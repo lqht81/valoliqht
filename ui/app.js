@@ -475,7 +475,8 @@ function renderLobby(snap) {
     ? `<div class="section"><h2>Partin<span class="timer">${esc(l.queue)}${l.searching ? " · sıra aranıyor" : ""}</span></h2>
         <div class="members">${l.members.map(lobbyMember).join("")}</div></div>`
     : "";
-  const missions = `<div class="section"><h2>Görevler</h2>${a ? missionList(a.missions, a.weekly_refill) : `<div class="note">Yükleniyor…</div>`}</div>`;
+  const missions = `<div class="section"><h2>Görevler</h2>${a ? missionList(a.missions, a.weekly_refill)
+    : `<div class="note">Görevler ve mağaza, <b>Hesabım</b> sekmesini açtığında burada da görünür.</div>`}</div>`;
   const st = a && a.store;
   const shop = st
     ? `<div class="section"><h2>Bugünkü mağaza<span class="timer">${duration(st.daily_ends_in)} sonra yenilenir</span></h2>
@@ -523,7 +524,6 @@ function renderMatch(snap) {
 function showSnapshot(snap) {
   const key = JSON.stringify(snap);
   last = snap;
-  if (["menu", "client_only", "pregame", "ingame"].includes(snap.status)) ensureAccount();
   if (key === lastKey) return;
   lastKey = key;
   renderMatch(snap);
@@ -849,7 +849,7 @@ function renderInventory() {
   const grid = items.length
     ? `<div class="owned">${items.map((i) => `<div class="own${g.key === "titles" ? " title-only" : ""}"${tierStyle(i.tier_color)} title="${esc(i.name)}">
         ${img(i.image, "", i.name)}<div class="o-name">${esc(i.name)}</div>
-        <div class="o-weapon">${esc(i.sub || "")}${i.price != null ? `<span class="o-price">${num(i.price)} VP</span>` : ""}</div></div>`).join("")}</div>`
+        <div class="o-weapon">${esc(i.sub || "")}${i.price != null ? `<span class="o-price"${i.estimated ? ` title="Kademe fiyatından tahmin"` : ""}>${i.estimated ? "~" : ""}${num(i.price)} VP</span>` : ""}</div></div>`).join("")}</div>`
     : `<div class="note">Bu bölümde bir şey yok.</div>`;
   const focusId = document.activeElement && document.activeElement.id;
   box.innerHTML = `${head}
@@ -865,7 +865,7 @@ function renderInventory() {
         <input class="search" id="inv-search" placeholder="Ara" value="${esc(inventoryFilter)}"></div>
       ${grid}
     </div>
-    <div class="problems">Değer, mağazada tek tek satılan eşyaların VP fiyatından hesaplanır. Battle Pass, paket ve ödül olarak gelenlerin fiyatı yoktur.</div>`;
+    <div class="problems">Riot tam fiyat listesini artık yayınlamıyor. Mağazanda şu an görünen eşyaların (günlük mağaza, Night Market, paketler, mini paket mağazası) gerçek fiyatı kullanılır; diğer skinler kademe fiyatıyla (Select 875, Deluxe 1275, Premium 1775, Exclusive 2175, Ultra 2475; bıçaklar iki katı) tahmin edilir ve ~ ile işaretlenir. Battle Pass, kontrat ve ödül olarak gelenlerin fiyatı yoktur.${inv.note ? `<br>${esc(inv.note)}` : ""}</div>`;
   if (focusId === "inv-search" && $("inv-search")) {
     const el = $("inv-search");
     el.focus();

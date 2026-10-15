@@ -15,22 +15,77 @@ pub const T_TITLE: &str = "de7caa6b-adf7-4588-bbd1-143831e786c6";
 pub const T_FLEX: &str = "03a572de-4234-31ed-d344-ababa488f981";
 pub const T_AGENT: &str = "01bb38e1-da47-4e6a-9b3d-945fe4655707";
 
+/// Standard VP price per content tier (weapon, melee), used when Riot's
+/// price list is not available. Special collections can cost more.
+const TIER_PRICES: [(&str, u64, u64); 5] = [
+    ("12683d76-48d7-84a3-4e09-6985794f0445", 875, 1750),  // Select
+    ("0cebb8be-46d7-c12a-d306-e9907bfc5a25", 1275, 2550), // Deluxe
+    ("60bca009-4182-7998-dee7-b8a2558dc369", 1775, 3550), // Premium
+    ("e046854e-406c-37f4-6607-19a9ba8426fc", 2175, 4350), // Exclusive
+    ("411e4a55-4e59-7757-41f0-86a53f101bb5", 2475, 4950), // Ultra
+];
+
+fn tier_price(tier: &str, melee: bool) -> Option<u64> {
+    TIER_PRICES
+        .iter()
+        .find(|(id, _, _)| id.eq_ignore_ascii_case(tier))
+        .map(|(_, gun, knife)| if melee { *knife } else { *gun })
+}
+
 fn arr<'a>(v: &'a Value, key: &str) -> impl Iterator<Item = &'a Value> {
     v.get(key).and_then(Value::as_array).into_iter().flatten()
 }
 
-/// Item id (lower-case) -> VP price, from the store's full offer list.
-pub fn prices(offers: &Value) -> HashMap<String, u64> {
+/// Item id (lower-case) -> VP price, from every offer found in a store
+/// response. Riot removed the full price list, so this collects whatever the
+/// storefront carries: daily offers, night market, bundle items, accessory and
+/// plugin stores. Works on the old `{"Offers": [...]}` shape too.
+pub fn prices(v: &Value) -> HashMap<String, u64> {
     let mut out = HashMap::new();
-    for o in arr(offers, "Offers") {
-        let Some(price) = o.get("Cost").and_then(|c| u64_at(c, VP)) else { continue };
-        for r in arr(o, "Rewards") {
-            if let Some(id) = str_at(r, "ItemID") {
-                out.insert(id.to_lowercase(), price);
+    collect(v, &mut out);
+    out
+}
+
+fn collect(v: &Value, out: &mut HashMap<String, u64>) {
+    match v {
+        Value::Object(map) => {
+            // { "Cost": {VP: n}, "Rewards": [{ "ItemID": .. }] }
+            if let (Some(cost), Some(rewards)) = (
+                map.get("Cost").and_then(|c| u64_at(c, VP)),
+                map.get("Rewards").and_then(Value::as_array),
+            ) {
+                // A reward bundle (several items for one price) says nothing
+                // about each item, so only single-item offers count.
+                if rewards.len() == 1 {
+                    if let Some(id) = str_at(&rewards[0], "ItemID") {
+                        out.entry(id.to_lowercase()).or_insert(cost);
+                    }
+                }
+            }
+            // Bundle items: { "Item": { "ItemID": .. }, "BasePrice": n, "CurrencyID": VP }
+            if let (Some(item), Some(price)) = (map.get("Item"), map.get("BasePrice").and_then(Value::as_u64)) {
+                let vp = map
+                    .get("CurrencyID")
+                    .and_then(Value::as_str)
+                    .map(|c| c.eq_ignore_ascii_case(VP))
+                    .unwrap_or(true);
+                if vp && price > 0 {
+                    if let Some(id) = str_at(item, "ItemID") {
+                        out.entry(id.to_lowercase()).or_insert(price);
+                    }
+                }
+            }
+            for x in map.values() {
+                collect(x, out);
             }
         }
+        Value::Array(a) => {
+            for x in a {
+                collect(x, out);
+            }
+        }
+        _ => {}
     }
-    out
 }
 
 /// Entitlements grouped by item type, from `/store/v1/entitlements/{puuid}`.
@@ -56,6 +111,8 @@ pub struct Item {
     pub image: Option<String>,
     pub tier_color: Option<String>,
     pub price: Option<u64>,
+    /// Price guessed from the skin's tier rather than read from the store.
+    pub estimated: bool,
     #[serde(skip)]
     pub rarity: u64,
 }
@@ -76,6 +133,10 @@ pub struct Inventory {
     pub value: u64,
     pub priced: u32,
     pub unpriced: u32,
+    /// True when skin prices come from tier estimates.
+    pub estimated: bool,
+    /// Why the store price list could not be used, if it could not.
+    pub note: Option<String>,
 }
 
 fn group(key: &str, label: &str, mut items: Vec<Item>) -> Group {
@@ -95,7 +156,13 @@ fn group(key: &str, label: &str, mut items: Vec<Item>) -> Group {
     }
 }
 
-pub fn build(owned: &HashMap<String, Vec<String>>, prices: &HashMap<String, u64>, c: &Content) -> Inventory {
+/// `estimate`: fill in skin prices from their tier when the store gave none.
+pub fn build(
+    owned: &HashMap<String, Vec<String>>,
+    prices: &HashMap<String, u64>,
+    c: &Content,
+    estimate: bool,
+) -> Inventory {
     let get = |t: &str| owned.get(t).cloned().unwrap_or_default();
     let price = |id: &str| prices.get(id).copied();
 
@@ -117,13 +184,20 @@ pub fn build(owned: &HashMap<String, Vec<String>>, prices: &HashMap<String, u64>
         if weapon.and_then(|w| w.default_skin.as_ref()) == Some(skin_id) {
             continue;
         }
+        let guess = if estimate {
+            let melee = weapon.map(|w| w.category == "Melee").unwrap_or(false);
+            skin.tier.as_deref().and_then(|t| tier_price(t, melee))
+        } else {
+            None
+        };
         skins.push(Item {
             id: skin_id.clone(),
             name: skin.name.clone(),
             sub: weapon.map(|w| w.name.clone()),
             image: skin.icon.clone(),
             tier_color: skin.tier.as_ref().and_then(|t| c.tiers.get(t)).cloned(),
-            price: best.get(skin_id).copied(),
+            price: best.get(skin_id).copied().or(guess),
+            estimated: !best.contains_key(skin_id) && guess.is_some(),
             rarity: skin.tier.as_ref().and_then(|t| c.tier_rank.get(t)).copied().unwrap_or(0),
         });
     }
@@ -143,6 +217,7 @@ pub fn build(owned: &HashMap<String, Vec<String>>, prices: &HashMap<String, u64>
                     image: img,
                     tier_color: None,
                     price: price(&id),
+                    estimated: false,
                     rarity: 0,
                 });
             }
@@ -176,6 +251,8 @@ pub fn build(owned: &HashMap<String, Vec<String>>, prices: &HashMap<String, u64>
         value,
         priced,
         unpriced: total - priced,
+        estimated: groups.iter().any(|g| g.items.iter().any(|i| i.estimated)),
+        note: None,
         groups,
     }
 }

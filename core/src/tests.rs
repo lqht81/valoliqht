@@ -513,7 +513,11 @@ fn inventory_value() {
         { "Cost": { VP: 475 }, "Rewards": [{ "ItemID": "BUDDY-LVL" }] },
         { "Cost": { "other-currency": 5 }, "Rewards": [{ "ItemID": "spray-1" }] }
     ]}));
-    let r = inv::build(&owned, &prices, &c);
+    let r = inv::build(&owned, &prices, &c, false);
+    assert!(!r.estimated);
+    let guess = inv::build(&owned, &std::collections::HashMap::new(), &c, true);
+    assert_eq!(guess.groups[0].items[0].price, None, "test tier is not a standard tier");
+    assert!(!guess.estimated);
     let g = |k: &str| r.groups.iter().find(|g| g.key == k).unwrap();
     assert_eq!(g("skins").items.len(), 1, "standard skin skipped");
     assert_eq!(g("skins").items[0].price, Some(1775));
@@ -571,4 +575,32 @@ fn update_versions() {
     assert!(updater::verify(hello, Some("sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824")).is_ok());
     assert!(updater::verify(hello, Some("sha256:00")).is_err());
     assert!(updater::verify(hello, None).is_ok());
+}
+
+
+#[test]
+fn prices_from_storefront_shapes() {
+    use crate::inventory as inv;
+    let front = json!({
+        "FeaturedBundle": { "Bundles": [{ "Items": [
+            { "Item": { "ItemTypeID": "x", "ItemID": "LVL-A", "Amount": 1 }, "BasePrice": 1775, "CurrencyID": VP },
+            { "Item": { "ItemID": "free" }, "BasePrice": 0, "CurrencyID": VP }
+        ]}]},
+        "PluginStores": [{ "PluginOffers": { "StoreOffers": [{
+            "PurchaseInformation": { "Cost": { VP: 3550 }, "Rewards": [] },
+            "SubOffers": [
+                { "PurchaseInformation": { "Cost": { VP: 2175 }, "Rewards": [{ "ItemID": "lvl-b", "Quantity": 1 }] } },
+                { "PurchaseInformation": { "Cost": { VP: 475 }, "Rewards": [{ "ItemID": "buddy-x", "Quantity": 2 }] } }
+            ]
+        }]}}],
+        "AccessoryStore": { "AccessoryStoreOffers": [{ "Offer": { "Cost": { "kc": 4000 }, "Rewards": [{ "ItemID": "card-k" }] } }] },
+        "Bundle": { "Cost": { VP: 9000 }, "Rewards": [{ "ItemID": "a" }, { "ItemID": "b" }] }
+    });
+    let p = inv::prices(&front);
+    assert_eq!(p.get("lvl-a"), Some(&1775));
+    assert_eq!(p.get("lvl-b"), Some(&2175));
+    assert_eq!(p.get("buddy-x"), Some(&475));
+    assert!(!p.contains_key("free"));
+    assert!(!p.contains_key("card-k"), "only VP prices");
+    assert!(!p.contains_key("a"), "multi-item rewards are not per-item prices");
 }

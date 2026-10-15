@@ -41,6 +41,12 @@ const RANK_TTL: Duration = Duration::from_secs(600);
 const STATS_TTL: Duration = Duration::from_secs(300);
 const ACCOUNT_TTL: Duration = Duration::from_secs(60);
 const STATS_MATCHES: usize = 8;
+/// Gap between account requests so they don't arrive as one burst.
+const PACE: Duration = Duration::from_millis(350);
+
+async fn pace() {
+    tokio::time::sleep(PACE).await;
+}
 const OWN_MATCHES: usize = 20;
 const OWN_TTL: Duration = Duration::from_secs(300);
 const INVENTORY_TTL: Duration = Duration::from_secs(600);
@@ -677,8 +683,21 @@ impl Engine {
             .pd(&s, &format!("/store/v1/entitlements/{}", s.puuid))
             .await?
             .unwrap_or(Value::Null);
-        let offers = i.riot.pd(&s, "/store/v1/offers/").await.ok().flatten().unwrap_or(Value::Null);
-        let inv = inventory::build(&inventory::by_type(&owned), &inventory::prices(&offers), &c);
+        // Riot no longer publishes a full price list; read every price the
+        // storefront carries and estimate the rest from skin tiers.
+        let empty = Value::Object(Default::default());
+        let front = match i.riot.pd_post(&s, &format!("/store/v3/storefront/{}", s.puuid), &empty).await {
+            Ok(Some(v)) => Ok(v),
+            Ok(None) => Err("mağaza cevap vermedi".to_string()),
+            Err(e) => Err(e),
+        };
+        let (prices, note) = match front {
+            Ok(v) => (inventory::prices(&v), None),
+            Err(e) => (HashMap::new(), Some(format!("Mağaza fiyatları alınamadı: {e}"))),
+        };
+        // Store prices where Riot gives them; tier prices for the rest.
+        let mut inv = inventory::build(&inventory::by_type(&owned), &prices, &c, true);
+        inv.note = note;
         *i.inventory.lock().unwrap() = Some(Timed::now(inv.clone()));
         Ok(inv)
     }
@@ -726,6 +745,7 @@ impl Engine {
         let ids = i.history(&s, &puuid, STATS_MATCHES).await?;
         let mut lines = Vec::new();
         for id in ids {
+            pace().await;
             if let Some(d) = i.details(&s, &id).await {
                 if let Some(l) = stats::line(&d, &puuid, &c) {
                     lines.push(l);
@@ -776,12 +796,14 @@ impl Engine {
         }
 
         let mut border_id: Option<String> = None;
+        pace().await;
         match i.riot.pd(&s, &format!("/account-xp/v1/players/{me}")).await {
             Ok(Some(v)) => view.level = v.pointer("/Progress/Level").and_then(Value::as_u64),
             Ok(None) => {}
             Err(e) => note("Seviye", e),
         }
 
+        pace().await;
         match i.riot.pd(&s, &format!("/personalization/v2/players/{me}/playerloadout")).await {
             Ok(Some(v)) => {
                 let card = v
@@ -804,18 +826,21 @@ impl Engine {
             Err(e) => note("Kart", e),
         }
 
+        pace().await;
         match i.rank_of(&s, &c, act.as_deref(), &me).await {
             Ok(r) => view.rank = Some(r),
             Err(e) => note("Rank", e),
         }
 
         let rr_path = format!("/mmr/v1/players/{me}/competitiveupdates?startIndex=0&endIndex=10&queue=competitive");
+        pace().await;
         match i.riot.pd(&s, &rr_path).await {
             Ok(Some(v)) => view.rr_history = account::rr_history(&v, &c),
             Ok(None) => {}
             Err(e) => note("RR geçmişi", e),
         }
 
+        pace().await;
         match i.riot.pd(&s, &format!("/store/v1/wallet/{me}")).await {
             Ok(Some(v)) => view.wallet = Some(account::wallet(&v)),
             Ok(None) => {}
@@ -823,6 +848,7 @@ impl Engine {
         }
 
         let empty = Value::Object(Default::default());
+        pace().await;
         let store = match i.riot.pd_post(&s, &format!("/store/v3/storefront/{me}"), &empty).await {
             Ok(Some(v)) => Ok(Some(v)),
             _ => i.riot.pd(&s, &format!("/store/v2/storefront/{me}")).await,
@@ -834,12 +860,14 @@ impl Engine {
         }
 
         let ent_path = format!("/store/v1/entitlements/{me}/{}", account::SKIN_LEVEL_TYPE);
+        pace().await;
         match i.riot.pd(&s, &ent_path).await {
             Ok(Some(v)) => view.collection = account::collection(&v, &c),
             Ok(None) => {}
             Err(e) => note("Koleksiyon", e),
         }
 
+        pace().await;
         match i.riot.pd(&s, &format!("/contracts/v1/contracts/{me}")).await {
             Ok(Some(v)) => {
                 view.contracts = account::contracts(&v, act.as_deref(), &c);

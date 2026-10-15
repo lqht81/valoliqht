@@ -6,6 +6,9 @@ use serde_json::Value;
 use std::time::Duration;
 
 /// Base64 of the platform JSON every VALORANT client sends.
+/// Same user agent the game client sends.
+const USER_AGENT: &str = "ShooterGame/13 Windows/10.0.19042.1.256.64bit";
+
 const CLIENT_PLATFORM: &str = "ew0KCSJwbGF0Zm9ybVR5cGUiOiAiUEMiLA0KCSJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLA0KCSJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwNCgkicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iDQp9";
 
 pub type Res<T> = Result<T, String>;
@@ -146,6 +149,7 @@ impl Riot {
 
     fn signed(&self, req: reqwest::RequestBuilder, s: &Session) -> reqwest::RequestBuilder {
         req.bearer_auth(&s.access_token)
+            .header(reqwest::header::USER_AGENT, USER_AGENT)
             .header("X-Riot-Entitlements-JWT", &s.entitlement)
             .header("X-Riot-ClientPlatform", CLIENT_PLATFORM)
             .header("X-Riot-ClientVersion", &s.version)
