@@ -37,8 +37,25 @@ pub struct Chroma {
 
 #[derive(Debug, Clone)]
 pub struct Card {
+    pub name: String,
     pub small: Option<String>,
     pub wide: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Border {
+    pub id: String,
+    pub start: u64,
+    pub image: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct MissionDef {
+    pub title: String,
+    /// daily | weekly | other
+    pub kind: String,
+    pub xp: u64,
+    pub target: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Default, PartialEq)]
@@ -73,12 +90,19 @@ pub struct Content {
     pub maps: HashMap<String, String>,
     /// buddy level uuid -> icon
     pub buddies: HashMap<String, String>,
+    /// buddy level uuid -> name
+    pub buddy_names: HashMap<String, String>,
+    /// level borders, lowest level first
+    pub borders: Vec<Border>,
+    pub missions: HashMap<String, MissionDef>,
     pub cards: HashMap<String, Card>,
     pub titles: HashMap<String, String>,
     pub ranks: HashMap<u64, TierBadge>,
     pub contracts: HashMap<String, Contract>,
     /// bundle uuid -> (name, image)
     pub bundles: HashMap<String, (String, Option<String>)>,
+    /// spray / flex uuid (and spray level uuids) -> (name, icon)
+    pub cosmetics: HashMap<String, (String, Option<String>)>,
 }
 
 fn s(v: &Value, key: &str) -> Option<String> {
@@ -118,6 +142,10 @@ pub struct Sources {
     pub ranks: Value,
     pub contracts: Value,
     pub bundles: Value,
+    pub sprays: Value,
+    pub flex: Value,
+    pub borders: Value,
+    pub missions: Value,
 }
 
 impl Content {
@@ -198,11 +226,43 @@ impl Content {
 
         for b in items(&src.buddies) {
             let icon = s(b, "displayIcon");
+            let name = s(b, "displayName").unwrap_or_default();
             for lv in arr(b, "levels") {
-                if let (Some(lid), Some(i)) = (id(lv, "uuid"), s(lv, "displayIcon").or(icon.clone())) {
-                    c.buddies.insert(lid, i);
+                let Some(lid) = id(lv, "uuid") else { continue };
+                if let Some(i) = s(lv, "displayIcon").or(icon.clone()) {
+                    c.buddies.insert(lid.clone(), i);
                 }
+                c.buddy_names.insert(lid, name.clone());
             }
+        }
+
+        for b in items(&src.borders) {
+            if let Some(uuid) = id(b, "uuid") {
+                c.borders.push(Border {
+                    id: uuid,
+                    start: b.get("startingLevel").and_then(Value::as_u64).unwrap_or(0),
+                    image: s(b, "levelNumberAppearance").or_else(|| s(b, "smallPlayerCardAppearance")),
+                });
+            }
+        }
+        c.borders.sort_by_key(|b| b.start);
+
+        for m in items(&src.missions) {
+            let Some(uuid) = id(m, "uuid") else { continue };
+            let kind = match s(m, "type").as_deref().map(|t| t.rsplit("::").next().unwrap_or(t)) {
+                Some(t) if t.eq_ignore_ascii_case("Daily") => "daily",
+                Some(t) if t.eq_ignore_ascii_case("Weekly") => "weekly",
+                _ => "other",
+            };
+            c.missions.insert(
+                uuid,
+                MissionDef {
+                    title: s(m, "title").or_else(|| s(m, "displayName")).unwrap_or_else(|| "Görev".into()),
+                    kind: kind.into(),
+                    xp: m.get("xpGrant").and_then(Value::as_u64).unwrap_or(0),
+                    target: m.get("progressToComplete").and_then(Value::as_u64).unwrap_or(0),
+                },
+            );
         }
 
         for card in items(&src.cards) {
@@ -210,6 +270,7 @@ impl Content {
                 c.cards.insert(
                     uuid,
                     Card {
+                        name: s(card, "displayName").unwrap_or_default(),
                         small: s(card, "smallArt").or_else(|| s(card, "displayIcon")),
                         wide: s(card, "wideArt"),
                     },
@@ -263,6 +324,26 @@ impl Content {
             );
         }
 
+        for sp in items(&src.sprays) {
+            let Some(name) = s(sp, "displayName") else { continue };
+            let icon = s(sp, "fullTransparentIcon")
+                .or_else(|| s(sp, "fullIcon"))
+                .or_else(|| s(sp, "displayIcon"));
+            if let Some(uuid) = id(sp, "uuid") {
+                c.cosmetics.insert(uuid, (name.clone(), icon.clone()));
+            }
+            for lv in arr(sp, "levels") {
+                if let Some(lid) = id(lv, "uuid") {
+                    c.cosmetics.insert(lid, (name.clone(), icon.clone()));
+                }
+            }
+        }
+        for f in items(&src.flex) {
+            if let (Some(uuid), Some(name)) = (id(f, "uuid"), s(f, "displayName")) {
+                c.cosmetics.insert(uuid, (name, s(f, "displayIcon")));
+            }
+        }
+
         for b in items(&src.bundles) {
             if let (Some(uuid), Some(name)) = (id(b, "uuid"), s(b, "displayName")) {
                 let icon = s(b, "displayIcon2").or_else(|| s(b, "displayIcon"));
@@ -301,6 +382,10 @@ impl Content {
             ranks: opt(http, "competitivetiers").await,
             contracts: opt(http, "contracts").await,
             bundles: opt(http, "bundles").await,
+            sprays: opt(http, "sprays").await,
+            flex: opt(http, "flex").await,
+            borders: opt(http, "levelborders").await,
+            missions: opt(http, "missions").await,
         };
         let c = Self::from_sources(&src);
         if c.weapons.is_empty() {
@@ -316,6 +401,21 @@ impl Content {
             color: None,
             icon: None,
         })
+    }
+
+    /// Border picture: the one the player picked, else the one their level earns.
+    pub fn border(&self, id: Option<&str>, level: Option<u64>) -> Option<String> {
+        if let Some(id) = id {
+            if let Some(b) = self.borders.iter().find(|b| b.id.eq_ignore_ascii_case(id)) {
+                return b.image.clone();
+            }
+        }
+        let level = level?;
+        self.borders
+            .iter()
+            .filter(|b| b.start <= level)
+            .last()
+            .and_then(|b| b.image.clone())
     }
 
     pub fn map_name(&self, path: &str) -> Option<String> {

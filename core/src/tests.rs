@@ -61,6 +61,18 @@ fn content() -> Content {
               "content": { "relationType": "Agent", "chapters": [{ "levels": [{}, {}, {}, {}] }] } }
         ]}),
         bundles: json!({ "data": [{ "uuid": "bundle-1", "displayName": "Prime", "displayIcon": "https://img/bundle.png" }]}),
+        sprays: json!({ "data": [{ "uuid": "SPRAY-1", "displayName": "Kalp", "fullTransparentIcon": "https://img/heart.png",
+                                  "levels": [{ "uuid": "spray-1-lvl" }] }]}),
+        flex: json!({ "data": [{ "uuid": "flex-1", "displayName": "Kupa", "displayIcon": "https://img/cup.png" }]}),
+        borders: json!({ "data": [
+            { "uuid": "b20", "startingLevel": 20, "levelNumberAppearance": "https://img/b20.png" },
+            { "uuid": "b1", "startingLevel": 1, "levelNumberAppearance": "https://img/b1.png" },
+            { "uuid": "B-SPECIAL", "startingLevel": 500, "levelNumberAppearance": "https://img/bs.png" }
+        ]}),
+        missions: json!({ "data": [
+            { "uuid": "M-1", "title": "3 maç oyna", "type": "EAresMissionType::Weekly", "xpGrant": 12000, "progressToComplete": 3 },
+            { "uuid": "m-2", "displayName": "Günlük", "type": "EAresMissionType::Daily", "xpGrant": 2000, "progressToComplete": 10 }
+        ]}),
     };
     Content::from_sources(&src)
 }
@@ -132,7 +144,9 @@ fn core_game_match() {
     });
     let l = json!({ "Loadouts": [
         { "CharacterID": "x", "Loadout": { "Subject": "enemy1", "Items": { VANDAL: item("skin-prime", None, None) } } },
-        { "CharacterID": "x", "Loadout": { "Subject": "me", "Items": { VANDAL: item("skin-vandal-std", None, None) } } }
+        { "CharacterID": "x", "Loadout": { "Subject": "me", "Items": { VANDAL: item("skin-vandal-std", None, None) },
+            "Sprays": { "SpraySelections": [{ "SocketID": "s", "SprayID": "spray-1", "LevelID": "x" }, { "SocketID": "t", "SprayID": "unknown" }] },
+            "Expressions": { "AESSelections": [{ "SocketID": "u", "AssetID": "FLEX-1", "TypeID": "f" }, { "SocketID": "v", "AssetID": "SPRAY-1" }] } } }
     ]});
     let raw = players_from_core(&m);
     let by = loadouts_by_player(&l, &raw);
@@ -143,7 +157,16 @@ fn core_game_match() {
     let mut ranks_map = HashMap::new();
     ranks_map.insert("enemy1".to_string(), ranks::RankInfo { current: c.rank(12), ..Default::default() });
     let parties = number_parties(&[vec!["mate".to_string(), "me".to_string()]], &["enemy1".to_string(), "me".to_string(), "mate".to_string()]);
-    let x = Extras { names: &names, ranks: &ranks_map, parties: &parties };
+    let mut enc = HashMap::new();
+    enc.insert("enemy1".to_string(), crate::history::Encounter {
+        times: 2, ago: 3, ally: false, map: None, won: Some(true), agent: None, agent_icon: None,
+        kills: 1, deaths: 2, assists: 3, acs: 100,
+    });
+    enc.insert("me".to_string(), crate::history::Encounter {
+        times: 9, ago: 1, ally: true, map: None, won: None, agent: None, agent_icon: None,
+        kills: 0, deaths: 0, assists: 0, acs: 0,
+    });
+    let x = Extras { names: &names, ranks: &ranks_map, parties: &parties, encounters: &enc };
     let p = assemble(&raw, &by, &c, "me", &x);
 
     assert_eq!(p.iter().map(|x| x.puuid.as_str()).collect::<Vec<_>>(), ["me", "mate", "enemy1"]);
@@ -151,6 +174,10 @@ fn core_game_match() {
     assert_eq!(p[0].name.as_deref(), Some("Liqht"));
     assert_eq!(p[0].card.as_deref(), Some("https://img/card-s.png"));
     assert_eq!(p[0].title.as_deref(), Some("Efsane"));
+    let sprays: Vec<&str> = p[0].sprays.iter().map(|x| x.name.as_str()).collect();
+    assert_eq!(sprays, ["Kalp", "Kupa"], "unknown ids skipped, duplicates merged");
+    assert_eq!(p[0].sprays[0].icon.as_deref(), Some("https://img/heart.png"));
+    assert!(p[2].sprays.is_empty());
     assert_eq!(p[0].party, Some(1));
     assert_eq!(p[1].party, Some(1));
     assert_eq!(p[1].tag, None);
@@ -163,6 +190,9 @@ fn core_game_match() {
     assert_eq!(enemy.rank.as_ref().map(|r| r.current.tier), Some(12));
     assert_eq!(enemy.agent.as_deref(), Some("Sage"));
     assert_eq!(enemy.weapons[0].skin, "Prime Vandal");
+    assert_eq!(enemy.encounter.as_ref().map(|e| e.ago), Some(3));
+    assert!(p[0].encounter.is_none(), "never an encounter with yourself");
+    assert_eq!(p[0].border.as_deref(), Some("https://img/b20.png"), "level 120 earns the level-20 border");
     assert_eq!(weapon_meta(&p, &c).len(), 1);
 }
 
@@ -183,7 +213,8 @@ fn pregame_loadouts_without_subject_use_order() {
     let empty_n = HashMap::new();
     let empty_r = HashMap::new();
     let empty_p = HashMap::new();
-    let x = Extras { names: &empty_n, ranks: &empty_r, parties: &empty_p };
+    let empty_e = HashMap::new();
+    let x = Extras { names: &empty_n, ranks: &empty_r, parties: &empty_p, encounters: &empty_e };
     let p = assemble(&raw, &by, &content(), "me", &x);
     assert!(p.iter().all(|x| x.ally));
     assert_eq!(p[1].weapons[0].skin, "Prime Vandal");
@@ -395,4 +426,149 @@ fn queue_names() {
     assert_eq!(stats::queue_label("competitive"), "Rekabetçi");
     assert_eq!(stats::queue_label("newmode"), "Newmode");
     assert_eq!(stats::queue_label(""), "Özel oyun");
+}
+
+
+#[test]
+fn borders_and_missions() {
+    let c = content();
+    assert_eq!(c.border(None, Some(5)).as_deref(), Some("https://img/b1.png"));
+    assert_eq!(c.border(Some("b-special"), Some(5)).as_deref(), Some("https://img/bs.png"), "chosen border wins");
+    assert_eq!(c.border(None, None), None);
+
+    let v = json!({
+        "Missions": [
+            { "ID": "m-1", "Objectives": { "o": 2 }, "Complete": false, "ExpirationTime": "2026-10-20T00:00:00Z" },
+            { "ID": "M-2", "Objectives": { "o": 15 }, "Complete": true },
+            { "ID": "unknown", "Objectives": {}, "Complete": false }
+        ]
+    });
+    let m = account::missions(&v, &c);
+    assert_eq!(m.len(), 3);
+    assert_eq!(m[0].kind, "weekly", "open missions first");
+    assert_eq!((m[0].progress, m[0].target, m[0].xp), (2, 3, 12000));
+    assert_eq!(m[0].expires.as_deref(), Some("2026-10-20T00:00:00Z"));
+    assert_eq!(m[1].title, "Görev");
+    let done = m.iter().find(|x| x.complete).unwrap();
+    assert_eq!((done.progress, done.target), (10, 10), "progress is capped at the target");
+}
+
+#[test]
+fn own_history_encounters_and_scoreboard() {
+    use crate::history;
+    let c = content();
+    let older = json!({
+        "matchInfo": { "matchId": "m0", "mapId": "/Game/Maps/Ascent/Ascent", "queueID": "unrated" },
+        "players": [
+            { "subject": "me", "teamId": "Red", "stats": { "score": 1, "roundsPlayed": 1, "kills": 0, "deaths": 0, "assists": 0 } },
+            { "subject": "foe", "teamId": "Red", "characterId": "aaaa-sage",
+              "stats": { "score": 200, "roundsPlayed": 1, "kills": 9, "deaths": 9, "assists": 9 } }
+        ],
+        "teams": [ { "teamId": "Red", "won": false, "roundsWon": 1 }, { "teamId": "Blue", "won": true, "roundsWon": 13 } ]
+    });
+    let newest = history::own_match(&details(), "me", &c).unwrap();
+    let old = history::own_match(&older, "me", &c).unwrap();
+    assert_eq!(newest.my_won, Some(true));
+    let list = vec![newest, old];
+
+    let e = history::encounter(&list, "other", &c).unwrap();
+    assert_eq!((e.ago, e.times, e.ally), (1, 1, false));
+    assert_eq!(e.map.as_deref(), Some("Ascent"));
+    let f = history::encounter(&list, "foe", &c).unwrap();
+    assert_eq!((f.ago, f.ally, f.won), (2, true, Some(false)));
+    assert_eq!(f.agent.as_deref(), Some("Sage"));
+    assert!(history::encounter(&list, "stranger", &c).is_none());
+
+    let mut friends = std::collections::HashSet::new();
+    friends.insert("nobody".to_string());
+    let mut d = details();
+    d["players"][0]["gameName"] = json!("Liqht");
+    d["players"][1]["gameName"] = json!("Kanka");
+    d["players"][2]["gameName"] = json!("Yabanci");
+    d["roundResults"][0]["playerStats"][0]["damage"][0]["damage"] = json!(300);
+    d["matchInfo"]["gameLengthMillis"] = json!(1_980_000);
+    let sb = history::scoreboard(&d, "me", &c, &friends).unwrap();
+    assert_eq!(sb.minutes, 33);
+    assert_eq!((sb.won, sb.rounds_us, sb.rounds_them), (Some(true), 13, 7));
+    assert_eq!(sb.mine.len(), 2);
+    assert_eq!(sb.mine[0].name.as_deref(), Some("Liqht"));
+    assert_eq!(sb.mine[0].adr, 15);
+    assert_eq!(sb.mine[1].name.as_deref(), Some("Kanka"), "same party shows names");
+    assert_eq!(sb.theirs[0].name, None, "strangers stay anonymous");
+}
+
+#[test]
+fn inventory_value() {
+    use crate::inventory as inv;
+    let c = content();
+    let owned = inv::by_type(&json!({ "EntitlementsByTypes": [
+        { "ItemTypeID": inv::T_SKIN, "Entitlements": [{ "ItemID": "LVL-PRIME-1" }, { "ItemID": "lvl-vandal-std" }] },
+        { "ItemTypeID": inv::T_BUDDY, "Entitlements": [{ "ItemID": "buddy-lvl" }, { "ItemID": "buddy-lvl" }] },
+        { "ItemTypeID": inv::T_SPRAY, "Entitlements": [{ "ItemID": "spray-1" }] },
+        { "ItemTypeID": inv::T_TITLE, "Entitlements": [{ "ItemID": "title-1" }] },
+        { "ItemTypeID": inv::T_AGENT, "Entitlements": [{ "ItemID": "aaaa-jett" }, { "ItemID": "not-an-agent" }] }
+    ]}));
+    let prices = inv::prices(&json!({ "Offers": [
+        { "Cost": { VP: 1775 }, "Rewards": [{ "ItemID": "lvl-prime-1" }] },
+        { "Cost": { VP: 475 }, "Rewards": [{ "ItemID": "BUDDY-LVL" }] },
+        { "Cost": { "other-currency": 5 }, "Rewards": [{ "ItemID": "spray-1" }] }
+    ]}));
+    let r = inv::build(&owned, &prices, &c);
+    let g = |k: &str| r.groups.iter().find(|g| g.key == k).unwrap();
+    assert_eq!(g("skins").items.len(), 1, "standard skin skipped");
+    assert_eq!(g("skins").items[0].price, Some(1775));
+    assert_eq!(g("buddies").items.len(), 1, "duplicates merged");
+    assert_eq!(g("sprays").items[0].price, None);
+    assert_eq!(g("titles").items[0].name, "Efsane");
+    assert_eq!(r.value, 1775 + 475);
+    assert_eq!((r.priced, r.unpriced), (2, 2));
+    assert_eq!(r.agents, 1);
+}
+
+#[test]
+fn party_lobby() {
+    let c = content();
+    let party = json!({
+        "State": "MATCHMAKING",
+        "MatchmakingData": { "QueueID": "competitive" },
+        "Members": [
+            { "Subject": "mate", "CompetitiveTier": 12, "IsOwner": true, "IsReady": true,
+              "PlayerIdentity": { "AccountLevel": 30, "PlayerCardID": "card-1" } },
+            { "Subject": "me", "CompetitiveTier": 0, "IsReady": true,
+              "PlayerIdentity": { "AccountLevel": 120, "PreferredLevelBorderID": "B-SPECIAL", "PlayerTitleID": "title-1" } }
+        ]
+    });
+    let mut names = HashMap::new();
+    names.insert("mate".to_string(), ("Kanka".to_string(), "0001".to_string()));
+    let l = lobby(&party, "me", &c, &names);
+    assert!(l.searching);
+    assert_eq!(l.queue, "Rekabetçi");
+    assert_eq!(l.members[0].puuid, "me", "you first");
+    assert_eq!(l.members[0].border.as_deref(), Some("https://img/bs.png"));
+    assert_eq!(l.members[0].title.as_deref(), Some("Efsane"));
+    assert_eq!(l.members[1].name.as_deref(), Some("Kanka"));
+    assert!(l.members[1].owner);
+    assert_eq!(l.members[1].rank.tier, 12);
+    assert_eq!(l.members[1].card.as_deref(), Some("https://img/card-s.png"));
+}
+
+#[test]
+fn update_versions() {
+    use crate::updater;
+    assert!(updater::is_newer("v0.4.0", "0.3.0"));
+    assert!(updater::is_newer("1.0", "0.9.9"));
+    assert!(!updater::is_newer("v0.3.0", "0.3.0"));
+    assert!(!updater::is_newer("garbage", "0.3.0"));
+    let rel = json!({ "tag_name": "v0.4.0", "body": "notlar", "assets": [
+        { "name": "ValoLiqht-setup.exe", "browser_download_url": "https://github.com/x/setup" },
+        { "name": "ValoLiqht-portable.exe", "browser_download_url": "https://github.com/x/portable", "digest": "sha256:ab" }
+    ]});
+    let u = updater::from_release(&rel, "0.3.0").unwrap();
+    assert_eq!(u.version, "0.4.0");
+    assert_eq!(u.url, "https://github.com/x/portable");
+    assert!(updater::from_release(&rel, "0.4.0").is_none());
+    let hello = b"hello";
+    assert!(updater::verify(hello, Some("sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824")).is_ok());
+    assert!(updater::verify(hello, Some("sha256:00")).is_err());
+    assert!(updater::verify(hello, None).is_ok());
 }

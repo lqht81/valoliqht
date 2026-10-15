@@ -1,6 +1,7 @@
 //! Turns Riot's match and loadout data into what the window shows.
 
-use crate::content::Content;
+use crate::content::{Content, TierBadge};
+use crate::history::Encounter;
 use crate::ranks::RankInfo;
 use crate::riot::{str_at, u64_at};
 use serde::Serialize;
@@ -33,12 +34,24 @@ pub struct PlayerView {
     pub ally: bool,
     pub is_me: bool,
     pub level: Option<u64>,
+    /// Level border picture.
+    pub border: Option<String>,
     pub card: Option<String>,
     pub title: Option<String>,
     pub rank: Option<RankInfo>,
     /// Same number = queued together. Numbered from 1 per match.
     pub party: Option<u32>,
+    /// Met in one of your recent matches (advanced only).
+    pub encounter: Option<Encounter>,
     pub weapons: Vec<WeaponSkin>,
+    /// Equipped sprays and flex items.
+    pub sprays: Vec<Cosmetic>,
+}
+
+#[derive(Debug, Serialize, Clone, PartialEq)]
+pub struct Cosmetic {
+    pub name: String,
+    pub icon: Option<String>,
 }
 
 #[derive(Debug, Serialize, Clone, PartialEq)]
@@ -60,6 +73,8 @@ pub struct Snapshot {
     pub score: Option<[u64; 2]>,
     /// Whether premade groups and peak ranks are being shown.
     pub advanced: bool,
+    /// Your party while in menus.
+    pub lobby: Option<Lobby>,
     pub players: Vec<PlayerView>,
     pub weapons: Vec<WeaponMeta>,
 }
@@ -83,6 +98,7 @@ pub struct RawPlayer {
     pub level: Option<u64>,
     pub card_id: Option<String>,
     pub title_id: Option<String>,
+    pub border_id: Option<String>,
 }
 
 fn raw_player(p: &Value, team: String) -> Option<RawPlayer> {
@@ -107,6 +123,7 @@ fn raw_player(p: &Value, team: String) -> Option<RawPlayer> {
         level,
         card_id: ident_str("PlayerCardID"),
         title_id: ident_str("PlayerTitleID"),
+        border_id: ident_str("PreferredLevelBorderID"),
     })
 }
 
@@ -135,12 +152,14 @@ pub fn loadouts_by_player(l: &Value, players: &[RawPlayer]) -> HashMap<String, V
     let list = l.get("Loadouts").and_then(Value::as_array);
     for (i, entry) in list.into_iter().flatten().enumerate() {
         let body = entry.get("Loadout").unwrap_or(entry);
-        let Some(items) = body.get("Items") else { continue };
+        if body.get("Items").is_none() {
+            continue;
+        }
         let subject = str_at(body, "Subject")
             .or_else(|| str_at(entry, "Subject"))
             .or_else(|| players.get(i).map(|p| p.puuid.clone()));
         if let Some(s) = subject {
-            out.insert(s, items.clone());
+            out.insert(s, body.clone());
         }
     }
     out
@@ -215,6 +234,39 @@ pub fn weapon_skins(items: &Value, c: &Content) -> Vec<WeaponSkin> {
     out
 }
 
+/// Sprays and flex from a loadout. Riot has used both a `Sprays` block and a
+/// newer `Expressions` block, so read whichever is there.
+pub fn cosmetics(body: &Value, c: &Content) -> Vec<Cosmetic> {
+    let mut ids: Vec<String> = Vec::new();
+    let mut push = |v: Option<&Value>| {
+        if let Some(id) = v.and_then(Value::as_str).map(str::to_lowercase) {
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+    };
+    let list = |v: &Value, a: &str, b: &str| -> Vec<Value> {
+        v.get(a)
+            .and_then(|x| x.get(b))
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+    };
+    for s in list(body, "Sprays", "SpraySelections") {
+        push(s.get("SprayID"));
+    }
+    for s in list(body, "Expressions", "AESSelections") {
+        push(s.get("AssetID"));
+    }
+    ids.iter()
+        .filter_map(|id| c.cosmetics.get(id))
+        .map(|(name, icon)| Cosmetic {
+            name: name.clone(),
+            icon: icon.clone(),
+        })
+        .collect()
+}
+
 pub fn weapon_meta(players: &[PlayerView], c: &Content) -> Vec<WeaponMeta> {
     let mut seen: Vec<String> = Vec::new();
     for p in players {
@@ -287,6 +339,7 @@ pub struct Extras<'a> {
     pub names: &'a HashMap<String, (String, String)>,
     pub ranks: &'a HashMap<String, RankInfo>,
     pub parties: &'a HashMap<String, u32>,
+    pub encounters: &'a HashMap<String, Encounter>,
 }
 
 pub fn assemble(
@@ -318,17 +371,85 @@ pub fn assemble(
                 ally: p.team == my_team,
                 is_me,
                 level: p.level,
+                border: c.border(p.border_id.as_deref(), p.level),
                 card: p.card_id.as_ref().and_then(|id| c.cards.get(id)).and_then(|k| k.small.clone()),
                 title: p.title_id.as_ref().and_then(|id| c.titles.get(id)).cloned(),
                 rank: x.ranks.get(&p.puuid).cloned(),
                 party: x.parties.get(&p.puuid).copied(),
+                encounter: if is_me { None } else { x.encounters.get(&p.puuid).cloned() },
                 weapons: loadouts
                     .get(&p.puuid)
+                    .and_then(|body| body.get("Items"))
                     .map(|items| weapon_skins(items, c))
+                    .unwrap_or_default(),
+                sprays: loadouts
+                    .get(&p.puuid)
+                    .map(|body| cosmetics(body, c))
                     .unwrap_or_default(),
             }
         })
         .collect();
     out.sort_by_key(|p| (!p.ally, !p.is_me, p.party.unwrap_or(u32::MAX)));
     out
+}
+
+#[derive(Debug, Serialize, Clone, PartialEq)]
+pub struct LobbyMember {
+    pub puuid: String,
+    pub name: Option<String>,
+    pub tag: Option<String>,
+    pub is_me: bool,
+    pub owner: bool,
+    pub ready: bool,
+    pub level: Option<u64>,
+    pub border: Option<String>,
+    pub card: Option<String>,
+    pub title: Option<String>,
+    pub rank: TierBadge,
+}
+
+#[derive(Debug, Serialize, Clone, PartialEq)]
+pub struct Lobby {
+    pub queue: String,
+    pub searching: bool,
+    pub members: Vec<LobbyMember>,
+}
+
+/// Your party from `/parties/v1/parties/{id}`.
+pub fn lobby(party: &Value, me: &str, c: &Content, names: &HashMap<String, (String, String)>) -> Lobby {
+    let mut members: Vec<LobbyMember> = party
+        .get("Members")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|m| {
+            let raw = raw_player(m, String::new())?;
+            let name = names.get(&raw.puuid);
+            Some(LobbyMember {
+                is_me: raw.puuid == me,
+                owner: m.get("IsOwner").and_then(Value::as_bool).unwrap_or(false),
+                ready: m.get("IsReady").and_then(Value::as_bool).unwrap_or(false),
+                name: name.map(|n| n.0.clone()),
+                tag: name.map(|n| n.1.clone()).filter(|t| !t.is_empty()),
+                border: c.border(raw.border_id.as_deref(), raw.level),
+                card: raw.card_id.as_ref().and_then(|id| c.cards.get(id)).and_then(|k| k.small.clone()),
+                title: raw.title_id.as_ref().and_then(|id| c.titles.get(id)).cloned(),
+                rank: c.rank(u64_at(m, "CompetitiveTier").unwrap_or(0)),
+                level: raw.level,
+                puuid: raw.puuid,
+            })
+        })
+        .collect();
+    members.sort_by_key(|m| (!m.is_me, !m.owner));
+    Lobby {
+        queue: crate::stats::queue_label(
+            &m_str(party, "/MatchmakingData/QueueID").unwrap_or_default(),
+        ),
+        searching: str_at(party, "State").as_deref() == Some("MATCHMAKING"),
+        members,
+    }
+}
+
+fn m_str(v: &Value, ptr: &str) -> Option<String> {
+    v.pointer(ptr).and_then(Value::as_str).map(str::to_string)
 }

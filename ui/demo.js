@@ -7,6 +7,7 @@ const gem = (c) => svg(`<path fill="${c}" d="M20 2 36 16 20 38 4 16z"/><path fil
 const buddy = (c) => svg(`<circle cx="20" cy="20" r="12" fill="${c}"/><circle cx="20" cy="6" r="3" fill="#ccc"/>`, "0 0 40 40");
 const art = (a, b) => svg(`<defs><linearGradient id="g" x2="1" y2="1"><stop offset="0" stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient></defs><rect width="400" height="100" fill="url(#g)"/>`, "0 0 400 100");
 
+const border = (c) => svg(`<rect x="1" y="1" width="58" height="22" rx="5" fill="#1b2330" stroke="${c}" stroke-width="2"/>`, "0 0 60 24");
 const tier = (t, name, color) => ({ tier: t, name, color, icon: gem(color) });
 const GOLD2 = tier(13, "ALTIN 2", "#e8b84a");
 const PLAT1 = tier(15, "PLATİN 1", "#4fb3c2");
@@ -30,9 +31,11 @@ const w = (id, [name, color, b]) => ({
 const loadout = (v, p, o, s, k) => [w(V, v), w(P, p), w(O, o), w(S, s), w(K, k)];
 const std = (n) => [`Standart ${n}`, null];
 
+const spray = (c) => svg(`<path fill="${c}" d="M20 34 6 20a8 8 0 0 1 14-10 8 8 0 0 1 14 10z"/>`, "0 0 40 40");
+const sprays = (...cs) => cs.map((c, i) => ({ name: `Sprey ${i + 1}`, icon: spray(c) }));
 const player = (name, tag, agent, color, ally, extra, weapons) => ({
   puuid: name || agent, name, tag, hidden: false, agent, agent_icon: face(color), ally,
-  is_me: false, level: 120, card: face("#2b3a55"), title: null, rank: null, party: null,
+  is_me: false, level: 120, border: border("#8794a6"), card: face("#2b3a55"), title: null, rank: null, party: null, sprays: [], encounter: null,
   weapons, ...extra,
 });
 
@@ -51,15 +54,17 @@ const snapshot = {
     { id: K, name: "Yakın Dövüş", category: "Melee", icon: gun("#fff") },
   ],
   players: [
-    player("Liqht", "TR1", "Jett", "#8ad7ff", true, { is_me: true, level: 212, title: "Sıfırdan Kahraman", rank: rank(DIA3, 47, ASC1), party: 1 },
+    player("Liqht", "TR1", "Jett", "#8ad7ff", true, { is_me: true, level: 212, border: border("#f2c14e"), title: "Sıfırdan Kahraman", rank: rank(DIA3, 47, ASC1), party: 1, sprays: sprays("#ff6b6b", "#f2c14e", "#3ee0b0", "#6aa4ff") },
       loadout(["Prime Vandal Mavi", "#d1548d", "#f2c14e"], ["Ion Phantom", "#f5955b"], std("Operator"), ["Reaver Sheriff", "#f5955b"], ["Elderflame Hançer", "#f5955b"])),
-    player("Kanka", "0001", "Sage", "#9ff2d1", true, { rank: rank(PLAT1, 12, DIA3), party: 1 },
+    player("Kanka", "0001", "Sage", "#9ff2d1", true, { rank: rank(PLAT1, 12, DIA3), party: 1,
+        encounter: { times: 6, ago: 1, ally: true, map: "Lotus", won: true, agent: "Sage", agent_icon: face("#9ff2d1"), kills: 12, deaths: 9, assists: 11, acs: 198 } },
       loadout(["Reaver Vandal", "#f5955b", "#6aa4ff"], std("Phantom"), ["Glitchpop Operator", "#d1548d"], std("Sheriff"), std("Bıçak"))),
     player("Mert", "7777", "Omen", "#7d6bd1", true, { level: null, rank: rank(GOLD2, 88, null) },
       loadout(std("Vandal"), ["Oni Phantom", "#d1548d"], std("Operator"), ["Ion Sheriff", "#d1548d"], ["Karambit", "#fad663"])),
     player(null, null, "Reyna", "#c26bd1", false, { hidden: true, level: null, rank: rank(IMM2, 30, IMM2), party: 2, title: "Yapay Zekâ" },
       loadout(["Champions 2023 Vandal", "#fad663", "#ff6b6b"], std("Phantom"), std("Operator"), std("Sheriff"), std("Bıçak"))),
-    player("ProEnemy", "EU", "Raze", "#f2a35b", false, { rank: rank(ASC1, 61, IMM2), party: 2 },
+    player("ProEnemy", "EU", "Raze", "#f2a35b", false, { rank: rank(ASC1, 61, IMM2), party: 2, sprays: sprays("#c58cff", "#ff9f5a"),
+        encounter: { times: 2, ago: 3, ally: false, map: "Bind", won: false, agent: "Raze", agent_icon: face("#f2a35b"), kills: 22, deaths: 14, assists: 5, acs: 281 } },
       loadout(["Kuronami Vandal", "#fad663"], ["RGX 11z Pro Phantom", "#f5955b"], std("Operator"), std("Sheriff"), ["RGX Kesik", "#f5955b"])),
     player("Yalnız", "777", "Sova", "#5fa8ff", false, {},
       loadout(std("Vandal"), std("Phantom"), std("Operator"), std("Sheriff"), std("Bıçak"))),
@@ -99,7 +104,7 @@ const friends = [
   friend("Uyuyan", "000", "Çevrimdışı", { in_valorant: false }),
 ];
 
-const offer = (name, color, price, extra = {}) => ({ name, image: gun(color), tier_color: color, price, original: null, discount: null, ...extra });
+const offer = (name, color, price, extra = {}) => ({ skin_id: name, name, image: gun(color), tier_color: color, price, original: null, discount: null, ...extra });
 
 const account = {
   puuid: "Liqht",
@@ -139,6 +144,13 @@ const account = {
     { name: "Reaver Sheriff", weapon: "Sheriff", image: gun("#f5955b"), tier_color: "#f5955b" },
     { name: "Sakura Classic", weapon: "Classic", image: gun("#5fe0e8"), tier_color: "#5fe0e8" },
   ],
+  border: border("#f2c14e"),
+  weekly_refill: new Date(Date.now() + 3 * 86400e3).toISOString(),
+  missions: [
+    { title: "5 maç kazan", kind: "weekly", xp: 12000, progress: 3, target: 5, complete: false, expires: new Date(Date.now() + 3 * 86400e3).toISOString() },
+    { title: "100 rakip öldür", kind: "weekly", xp: 12000, progress: 64, target: 100, complete: false, expires: new Date(Date.now() + 3 * 86400e3).toISOString() },
+    { title: "2 maç oyna", kind: "daily", xp: 2000, progress: 2, target: 2, complete: true, expires: null },
+  ],
   contracts: [
     { name: "Bölüm 9 Battle Pass", kind: "Battle Pass", level: 31, total: 55 },
     { name: "Waylay", kind: "Aktif kontrat", level: 4, total: 10 },
@@ -146,4 +158,54 @@ const account = {
   problems: [],
 };
 
-export default { snapshot, stats, friends, account };
+
+
+const row = (name, agent, color, k, d, a, acs, extra = {}) => ({
+  puuid: name || agent, name, tag: name ? "TR" : null, agent, agent_icon: face(color), tier: PLAT1,
+  kills: k, deaths: d, assists: a, acs, adr: Math.round(acs * 0.62), hs: 22, is_me: false, ...extra,
+});
+const scoreboard = {
+  match_id: "x", map: "Ascent", queue: "Rekabetçi", started: 0, minutes: 38, won: true, rounds_us: 13, rounds_them: 9,
+  mine: [
+    row("Liqht", "Jett", "#8ad7ff", 24, 15, 4, 287, { is_me: true, tier: DIA3 }),
+    row("Kanka", "Sage", "#9ff2d1", 12, 9, 11, 198),
+    row(null, "Omen", "#7d6bd1", 14, 16, 6, 176),
+  ],
+  theirs: [
+    row(null, "Raze", "#f2a35b", 20, 18, 3, 255, { tier: ASC1 }),
+    row(null, "Sova", "#5fa8ff", 11, 17, 9, 160),
+  ],
+};
+const item = (name, sub, color, price) => ({ id: name, name, sub, image: gun(color), tier_color: color, price });
+const inventory = {
+  agents: 19, value: 18420, priced: 14, unpriced: 9,
+  groups: [
+    { key: "skins", label: "Skinler", value: 14275, priced: 7, items: [
+      item("Elderflame Hançer", "Yakın Dövüş", "#fad663", 5350), item("Prime Vandal", "Vandal", "#d1548d", 1775),
+      item("Ion Phantom", "Phantom", "#f5955b", 1775), item("Reaver Sheriff", "Sheriff", "#f5955b", 1775),
+      item("Sakura Classic", "Classic", "#5fe0e8", 875), item("Battle Pass Ares", "Ares", "#5a9fe2", null) ] },
+    { key: "buddies", label: "Buddy'ler", value: 1425, priced: 3, items: [
+      { id: "b1", name: "Kupa", sub: null, image: buddy("#f2c14e"), tier_color: null, price: 475 } ] },
+    { key: "cards", label: "Oyuncu kartları", value: 750, priced: 2, items: [] },
+    { key: "sprays", label: "Spreyler", value: 1300, priced: 4, items: [] },
+    { key: "flex", label: "Flex", value: 0, priced: 0, items: [] },
+    { key: "titles", label: "Unvanlar", value: 0, priced: 0, items: [
+      { id: "t1", name: "Sıfırdan Kahraman", sub: null, image: null, tier_color: null, price: null } ] },
+  ],
+};
+const catalog = [
+  { id: "Prime Vandal", name: "Prime Vandal", weapon: "Vandal", image: gun("#d1548d"), tier_color: "#d1548d" },
+  { id: "Prime Classic", name: "Prime Classic", weapon: "Classic", image: gun("#d1548d"), tier_color: "#d1548d" },
+  { id: "Prime Spectre", name: "Prime Spectre", weapon: "Spectre", image: gun("#d1548d"), tier_color: "#d1548d" },
+  { id: "Kuronami Vandal", name: "Kuronami Vandal", weapon: "Vandal", image: gun("#fad663"), tier_color: "#fad663" },
+];
+const lobby = {
+  status: "menu", message: null, match_id: null, map: null, queue: null, score: null, advanced: false, players: [], weapons: [],
+  lobby: { queue: "Rekabetçi", searching: false, members: [
+    { puuid: "Liqht", name: "Liqht", tag: "TR1", is_me: true, owner: true, ready: true, level: 212, border: border("#f2c14e"), card: face("#2b3a55"), title: "Sıfırdan Kahraman", rank: DIA3 },
+    { puuid: "Kanka", name: "Kanka", tag: "0001", is_me: false, owner: false, ready: true, level: 160, border: border("#8794a6"), card: face("#3a2b55"), title: null, rank: PLAT1 },
+  ] },
+};
+const update = { version: "0.4.1", url: "https://github.com/x", notes: null, digest: null };
+
+export default { snapshot, stats, friends, account, scoreboard, inventory, catalog, lobby, update };

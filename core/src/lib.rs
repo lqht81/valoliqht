@@ -1,21 +1,30 @@
 //! Reads the current VALORANT match, your account and your friends.
 //!
-//! Hosts contacted: 127.0.0.1 (Riot Client), Riot's servers (*.a.pvp.net)
-//! and valorant-api.com (public skin database). Nothing else.
+//! Hosts contacted: 127.0.0.1 (Riot Client), Riot's servers (*.a.pvp.net),
+//! valorant-api.com (public skin database) and, for the update check only,
+//! GitHub. Nothing is sent anywhere.
 
 pub mod account;
 pub mod content;
+pub mod history;
+pub mod inventory;
 pub mod local;
 pub mod ranks;
 pub mod riot;
 pub mod social;
 pub mod stats;
+pub mod updater;
 pub mod view;
 
 pub use account::AccountView;
+pub use history::Scoreboard;
+pub use inventory::Inventory;
 pub use social::FriendView;
 pub use stats::PlayerStats;
 pub use view::Snapshot;
+
+use history::{Encounter, OwnMatch};
+use serde::Serialize;
 
 use content::Content;
 use ranks::RankInfo;
@@ -32,6 +41,18 @@ const RANK_TTL: Duration = Duration::from_secs(600);
 const STATS_TTL: Duration = Duration::from_secs(300);
 const ACCOUNT_TTL: Duration = Duration::from_secs(60);
 const STATS_MATCHES: usize = 8;
+const OWN_MATCHES: usize = 20;
+const OWN_TTL: Duration = Duration::from_secs(300);
+const INVENTORY_TTL: Duration = Duration::from_secs(600);
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct CatalogSkin {
+    pub id: String,
+    pub name: String,
+    pub weapon: String,
+    pub image: Option<String>,
+    pub tier_color: Option<String>,
+}
 
 struct Timed<T> {
     at: Instant,
@@ -69,6 +90,10 @@ struct Inner {
     /// Premade groups, peak rank and other players' history. Off by default.
     advanced: AtomicBool,
     account: Mutex<Option<Timed<AccountView>>>,
+    inventory: Mutex<Option<Timed<Inventory>>>,
+    /// Your recent matches, newest first, and when they were last refreshed.
+    own: Mutex<(Option<Instant>, Vec<OwnMatch>)>,
+    own_loading: AtomicBool,
 }
 
 impl Inner {
@@ -229,6 +254,32 @@ impl Inner {
         self.finish(&key);
     }
 
+    /// Load your last matches (only new ones are downloaded).
+    async fn refresh_own(self: Arc<Self>, s: Session, c: Arc<Content>) {
+        let ids = match self.history(&s, &s.puuid, OWN_MATCHES).await {
+            Ok(ids) => ids,
+            Err(_) => {
+                self.own_loading.store(false, Ordering::Relaxed);
+                return;
+            }
+        };
+        let known: Vec<OwnMatch> = self.own.lock().unwrap().1.clone();
+        let mut list: Vec<OwnMatch> = Vec::new();
+        for id in &ids {
+            if let Some(m) = known.iter().find(|m| &m.id == id) {
+                list.push(m.clone());
+                continue;
+            }
+            if let Some(d) = self.details(&s, id).await {
+                if let Some(m) = history::own_match(&d, &s.puuid, &c) {
+                    list.push(m);
+                }
+            }
+        }
+        *self.own.lock().unwrap() = (Some(Instant::now()), list);
+        self.own_loading.store(false, Ordering::Relaxed);
+    }
+
     fn finish(&self, key: &str) {
         {
             let mut done = self.done.lock().unwrap();
@@ -271,6 +322,9 @@ impl Engine {
                 done: Mutex::new(HashSet::new()),
                 advanced: AtomicBool::new(false),
                 account: Mutex::new(None),
+                inventory: Mutex::new(None),
+                own: Mutex::new((None, Vec::new())),
+                own_loading: AtomicBool::new(false),
             }),
         }
     }
@@ -338,10 +392,29 @@ impl Engine {
             HashMap::new()
         };
 
+        let encounters: HashMap<String, Encounter> = if advanced {
+            let stale = {
+                let own = i.own.lock().unwrap();
+                own.0.map(|t| t.elapsed() > OWN_TTL).unwrap_or(true)
+            };
+            if stale && !i.own_loading.swap(true, Ordering::Relaxed) {
+                tokio::spawn(Arc::clone(i).refresh_own(s.clone(), c.clone()));
+            }
+            let own = i.own.lock().unwrap();
+            roster
+                .iter()
+                .filter(|p| **p != s.puuid)
+                .filter_map(|p| history::encounter(&own.1, p, c).map(|e| (p.clone(), e)))
+                .collect()
+        } else {
+            HashMap::new()
+        };
+
         let extras = view::Extras {
             names: &names,
             ranks: &ranks,
             parties: &parties,
+            encounters: &encounters,
         };
         let players = view::assemble(&raw, &by_player, c, &s.puuid, &extras);
         let queue = str_at(m, "QueueID")
@@ -360,6 +433,7 @@ impl Engine {
             queue: Some(stats::queue_label(&queue)),
             score,
             advanced,
+            lobby: None,
             weapons: view::weapon_meta(&players, c),
             players,
         }
@@ -372,6 +446,14 @@ impl Engine {
             Err((status, msg)) => return Snapshot::status(status, msg),
         };
         let presences = i.presences(&s).await;
+        let game_open = presences.is_empty()
+            || presences.iter().any(|p| p.puuid == s.puuid && p.product == "valorant");
+        if !game_open {
+            return Snapshot::status(
+                "client_only",
+                "VALORANT kapalı. Hesabım ve Arkadaşlar sekmelerine yine de bakabilirsin.",
+            );
+        }
 
         // In a match (or loading into one).
         match i.riot.glz(&s, &format!("/core-game/v1/players/{}", s.puuid)).await {
@@ -406,10 +488,110 @@ impl Engine {
             Err(e) => return Snapshot::status("error", e),
         }
 
-        Snapshot::status(
+        let mut snap = Snapshot::status(
             "menu",
             "Ajan seçimine girdiğinde takımının, maç başlayınca herkesin bilgileri görünür.",
-        )
+        );
+        snap.advanced = i.advanced();
+        snap.lobby = self.lobby(&s, &c).await;
+        snap
+    }
+
+    async fn lobby(&self, s: &Session, c: &Content) -> Option<view::Lobby> {
+        let i = &self.inner;
+        let me = i.riot.glz(s, &format!("/parties/v1/players/{}", s.puuid)).await.ok()??;
+        let id = str_at(&me, "CurrentPartyID")?;
+        let party = i.riot.glz(s, &format!("/parties/v1/parties/{id}")).await.ok()??;
+        let ids: Vec<String> = party
+            .get("Members")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|m| str_at(m, "Subject"))
+            .collect();
+        let missing: Vec<String> = {
+            let cache = i.names.lock().unwrap();
+            ids.into_iter().filter(|id| !cache.contains_key(id)).collect()
+        };
+        if !missing.is_empty() {
+            if let Ok(found) = i.riot.names(s, &missing).await {
+                let mut cache = i.names.lock().unwrap();
+                for (id, name, tag) in found {
+                    cache.insert(id, (name, tag));
+                }
+            }
+        }
+        let names = i.names.lock().unwrap().clone();
+        Some(view::lobby(&party, &s.puuid, c, &names))
+    }
+
+    /// Full scoreboard of one of your matches.
+    pub async fn match_detail(&self, id: String) -> Result<Scoreboard, String> {
+        let i = &self.inner;
+        let (s, c) = i.ready().await.map_err(|e| e.1)?;
+        let d = i
+            .details(&s, &id)
+            .await
+            .ok_or_else(|| "Maç detayı alınamadı.".to_string())?;
+        let friends: HashSet<String> = match i.riot.local_get(&s.lockfile, "/chat/v4/friends").await {
+            Ok(v) => v
+                .get("friends")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|f| str_at(f, "puuid"))
+                .collect(),
+            Err(_) => HashSet::new(),
+        };
+        history::scoreboard(&d, &s.puuid, &c, &friends).ok_or_else(|| "Bu maçta yoksun.".to_string())
+    }
+
+    /// Everything the account owns and its rough VP value.
+    pub async fn inventory(&self, force: bool) -> Result<Inventory, String> {
+        let i = &self.inner;
+        if !force {
+            let cached = {
+                let slot = i.inventory.lock().unwrap();
+                slot.as_ref()
+                    .filter(|t| t.at.elapsed() < INVENTORY_TTL)
+                    .map(|t| t.value.clone())
+            };
+            if let Some(v) = cached {
+                return Ok(v);
+            }
+        }
+        let (s, c) = i.ready().await.map_err(|e| e.1)?;
+        let owned = i
+            .riot
+            .pd(&s, &format!("/store/v1/entitlements/{}", s.puuid))
+            .await?
+            .unwrap_or(Value::Null);
+        let offers = i.riot.pd(&s, "/store/v1/offers/").await.ok().flatten().unwrap_or(Value::Null);
+        let inv = inventory::build(&inventory::by_type(&owned), &inventory::prices(&offers), &c);
+        *i.inventory.lock().unwrap() = Some(Timed::now(inv.clone()));
+        Ok(inv)
+    }
+
+    /// Every skin in the game, for picking wish-list items.
+    pub async fn catalog(&self) -> Result<Vec<CatalogSkin>, String> {
+        let c = self.inner.content().await?;
+        let mut out: Vec<CatalogSkin> = c
+            .skins
+            .iter()
+            .filter(|(id, sk)| {
+                sk.tier.is_some()
+                    && c.weapons.get(&sk.weapon).and_then(|w| w.default_skin.as_ref()) != Some(*id)
+            })
+            .map(|(id, sk)| CatalogSkin {
+                id: id.clone(),
+                name: sk.name.clone(),
+                weapon: c.weapons.get(&sk.weapon).map(|w| w.name.clone()).unwrap_or_default(),
+                image: sk.icon.clone(),
+                tier_color: sk.tier.as_ref().and_then(|t| c.tiers.get(t)).cloned(),
+            })
+            .collect();
+        out.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(out)
     }
 
     /// Recent matches of one player, loaded when their card is opened.
@@ -482,6 +664,7 @@ impl Engine {
             }
         }
 
+        let mut border_id: Option<String> = None;
         match i.riot.pd(&s, &format!("/account-xp/v1/players/{me}")).await {
             Ok(Some(v)) => view.level = v.pointer("/Progress/Level").and_then(Value::as_u64),
             Ok(None) => {}
@@ -496,6 +679,10 @@ impl Engine {
                     .and_then(|id| c.cards.get(&id.to_lowercase()));
                 view.card_wide = card.and_then(|k| k.wide.clone());
                 view.card_small = card.and_then(|k| k.small.clone());
+                border_id = v
+                    .pointer("/Identity/PreferredLevelBorderID")
+                    .and_then(Value::as_str)
+                    .map(str::to_lowercase);
                 view.title = v
                     .pointer("/Identity/PlayerTitleID")
                     .and_then(Value::as_str)
@@ -543,11 +730,19 @@ impl Engine {
         }
 
         match i.riot.pd(&s, &format!("/contracts/v1/contracts/{me}")).await {
-            Ok(Some(v)) => view.contracts = account::contracts(&v, act.as_deref(), &c),
+            Ok(Some(v)) => {
+                view.contracts = account::contracts(&v, act.as_deref(), &c);
+                view.missions = account::missions(&v, &c);
+                view.weekly_refill = v
+                    .pointer("/MissionMetadata/WeeklyRefillTime")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+            }
             Ok(None) => {}
             Err(e) => note("Kontratlar", e),
         }
 
+        view.border = c.border(border_id.as_deref(), view.level);
         view.problems = problems;
         *i.account.lock().unwrap() = Some(Timed::now(view.clone()));
         Ok(view)

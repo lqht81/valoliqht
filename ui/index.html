@@ -35,6 +35,7 @@
         <h1 id="empty-title">Bağlanıyor</h1>
         <p id="empty-text">Riot Client aranıyor…</p>
       </section>
+      <section class="lobby" id="lobby" hidden></section>
       <div class="teams" id="teams" hidden>
         <section class="team ally">
           <h2>Takımın</h2>
@@ -57,6 +58,7 @@
   <section class="view" id="view-account" hidden>
     <main class="scroll">
       <div class="page" id="account"></div>
+      <div class="page" id="inventory" hidden></div>
     </main>
   </section>
 
@@ -75,7 +77,9 @@
     </div>
   </div>
 
-  <footer class="foot">Veriler yalnızca bu bilgisayardaki Riot Client'tan, Riot sunucularından ve valorant-api.com'dan okunur. Hiçbir yere gönderilmez.</footer>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+
+  <footer class="foot"><span>Veriler yalnızca bu bilgisayardaki Riot Client'tan, Riot sunucularından ve valorant-api.com'dan okunur; güncelleme kontrolü için GitHub'a bakılır. Hiçbir yere gönderilmez.</span><span id="version"></span></footer>
 
   <script src="app.js"></script>
 </body>

@@ -34,6 +34,8 @@ pub fn wallet(v: &Value) -> Wallet {
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct Offer {
+    /// Skin uuid, for the wish list.
+    pub skin_id: Option<String>,
     pub name: String,
     pub image: Option<String>,
     pub tier_color: Option<String>,
@@ -60,8 +62,10 @@ pub struct Store {
 
 fn offer_for_level(level: &str, c: &Content) -> Offer {
     let level = level.to_lowercase();
-    let skin = c.levels.get(&level).and_then(|s| c.skins.get(s));
+    let skin_id = c.levels.get(&level).cloned();
+    let skin = skin_id.as_ref().and_then(|s| c.skins.get(s));
     Offer {
+        skin_id: skin_id.clone(),
         name: skin.map(|s| s.name.clone()).unwrap_or_else(|| "Bilinmeyen skin".into()),
         image: skin.and_then(|s| s.icon.clone()),
         tier_color: skin
@@ -228,6 +232,50 @@ pub fn rr_history(v: &Value, c: &Content) -> Vec<RrChange> {
         .collect()
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct MissionView {
+    pub title: String,
+    /// daily | weekly | other
+    pub kind: String,
+    pub xp: u64,
+    pub progress: u64,
+    pub target: u64,
+    pub complete: bool,
+    /// ISO time from Riot, e.g. 2026-10-20T00:00:00Z
+    pub expires: Option<String>,
+}
+
+pub fn missions(v: &Value, c: &Content) -> Vec<MissionView> {
+    let mut out: Vec<MissionView> = arr(v, "Missions")
+        .filter_map(|m| {
+            let id = str_at(m, "ID")?.to_lowercase();
+            let def = c.missions.get(&id);
+            let progress = m
+                .get("Objectives")
+                .and_then(Value::as_object)
+                .map(|o| o.values().filter_map(Value::as_u64).max().unwrap_or(0))
+                .unwrap_or(0);
+            let target = def.map(|d| d.target).filter(|t| *t > 0).unwrap_or(progress.max(1));
+            Some(MissionView {
+                title: def.map(|d| d.title.clone()).unwrap_or_else(|| "Görev".into()),
+                kind: def.map(|d| d.kind.clone()).unwrap_or_else(|| "other".into()),
+                xp: def.map(|d| d.xp).unwrap_or(0),
+                progress: progress.min(target),
+                target,
+                complete: m.get("Complete").and_then(Value::as_bool).unwrap_or(false),
+                expires: str_at(m, "ExpirationTime"),
+            })
+        })
+        .collect();
+    let order = |k: &str| match k {
+        "daily" => 0,
+        "weekly" => 1,
+        _ => 2,
+    };
+    out.sort_by_key(|m| (m.complete, order(&m.kind)));
+    out
+}
+
 #[derive(Debug, Clone, Serialize, Default, PartialEq)]
 pub struct AccountView {
     pub puuid: String,
@@ -243,5 +291,8 @@ pub struct AccountView {
     pub store: Option<Store>,
     pub collection: Vec<OwnedSkin>,
     pub contracts: Vec<ContractView>,
+    pub missions: Vec<MissionView>,
+    pub weekly_refill: Option<String>,
+    pub border: Option<String>,
     pub problems: Vec<String>,
 }
