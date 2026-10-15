@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ValoLiqht</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="mark" aria-hidden="true"></span>
+      <span class="brand-name">ValoLiqht</span>
+    </div>
+    <div class="match" id="match"></div>
+    <div class="status" id="status" data-state="waiting">
+      <span class="dot"></span><span id="status-text">Bağlanıyor</span>
+    </div>
+  </header>
+
+  <nav class="weapons" id="weapons" aria-label="Silah seçimi"></nav>
+
+  <main id="main">
+    <section class="empty" id="empty">
+      <div class="empty-mark" aria-hidden="true"></div>
+      <h1 id="empty-title">Bağlanıyor</h1>
+      <p id="empty-text">Riot Client aranıyor…</p>
+    </section>
+    <div class="teams" id="teams" hidden>
+      <section class="team ally">
+        <h2>Takımın</h2>
+        <div class="list" id="ally"></div>
+      </section>
+      <section class="team enemy">
+        <h2>Rakipler</h2>
+        <div class="list" id="enemy"></div>
+      </section>
+    </div>
+  </main>
+
+  <footer class="foot">Veriler yalnızca bu bilgisayardaki Riot Client'tan, Riot sunucularından ve valorant-api.com'dan okunur. Hiçbir yere gönderilmez.</footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

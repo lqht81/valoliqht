@@ -1,0 +1,232 @@
+:root {
+  --bg: #0d1117;
+  --panel: #151b24;
+  --panel-2: #1b2330;
+  --line: #263142;
+  --text: #e8edf3;
+  --muted: #8794a6;
+  --faint: #5b6778;
+  --ally: #3ee0b0;
+  --enemy: #ff6b6b;
+  --accent: #f2c14e;
+  --radius: 10px;
+  --head: "Bahnschrift", "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+  --body: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  background: radial-gradient(1200px 500px at 15% -10%, #18233a 0%, transparent 60%), var(--bg);
+  color: var(--text);
+  font: 14px/1.4 var(--body);
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+  overflow: hidden;
+  user-select: none;
+}
+
+/* Header */
+.top {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--line);
+}
+.brand { display: flex; align-items: center; gap: 10px; }
+.mark {
+  width: 22px; height: 22px;
+  background: linear-gradient(135deg, var(--ally), var(--accent));
+  clip-path: polygon(0 0, 38% 0, 38% 62%, 100% 62%, 100% 100%, 0 100%);
+}
+.brand-name { font: 600 18px var(--head); letter-spacing: .04em; }
+.match { flex: 1; color: var(--muted); font: 500 15px var(--head); letter-spacing: .03em; }
+.match b { color: var(--text); font-weight: 600; }
+
+.status {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 13px;
+  color: var(--muted);
+  background: var(--panel);
+}
+.status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
+.status[data-state="ingame"] .dot { background: var(--ally); box-shadow: 0 0 10px var(--ally); }
+.status[data-state="pregame"] .dot { background: var(--accent); box-shadow: 0 0 10px var(--accent); }
+.status[data-state="menu"] .dot { background: #6aa4ff; }
+.status[data-state="error"] .dot { background: var(--enemy); }
+
+/* Weapon picker */
+.weapons {
+  display: flex;
+  gap: 6px;
+  padding: 10px 20px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  border-bottom: 1px solid var(--line);
+  min-height: 0;
+}
+.weapons:empty { display: none; }
+.chip {
+  flex: none;
+  display: flex; align-items: center; gap: 8px;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--muted);
+  font: 500 13px var(--head);
+  letter-spacing: .02em;
+  cursor: pointer;
+}
+.chip img { height: 16px; max-width: 54px; object-fit: contain; filter: brightness(0) invert(.75); }
+.chip:hover { color: var(--text); border-color: #3a4860; }
+.chip[aria-pressed="true"] { color: #10141b; background: var(--accent); border-color: var(--accent); }
+.chip[aria-pressed="true"] img { filter: brightness(0); }
+
+/* Main */
+main { overflow: auto; padding: 18px 20px; min-height: 0; }
+
+.empty {
+  height: 100%;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  text-align: center;
+  gap: 4px;
+}
+.empty-mark {
+  width: 56px; height: 56px; margin-bottom: 14px;
+  background: linear-gradient(135deg, var(--ally), var(--accent));
+  clip-path: polygon(0 0, 38% 0, 38% 62%, 100% 62%, 100% 100%, 0 100%);
+  opacity: .85;
+}
+.empty h1 { margin: 0; font: 600 22px var(--head); letter-spacing: .03em; }
+.empty p { margin: 0; color: var(--muted); max-width: 440px; }
+
+.teams { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.teams.solo { grid-template-columns: 1fr; max-width: 720px; margin: 0 auto; }
+[hidden] { display: none !important; }
+
+.team h2 {
+  margin: 0 0 10px;
+  font: 600 13px var(--head);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+.team.ally h2 { color: var(--ally); }
+.team.enemy h2 { color: var(--enemy); }
+
+.list { display: grid; gap: 8px; }
+.list .note {
+  padding: 18px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  color: var(--faint);
+  text-align: center;
+}
+
+/* Player card */
+.player {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--ally);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.enemy .player { border-left-color: var(--enemy); }
+.player.me { background: linear-gradient(90deg, rgba(62, 224, 176, .08), transparent 40%), var(--panel); }
+
+.row {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 170px;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  min-height: 66px;
+}
+.agent {
+  width: 44px; height: 44px;
+  border-radius: 8px;
+  background: var(--panel-2);
+  object-fit: cover;
+}
+.who { min-width: 0; }
+.name {
+  font: 600 15px var(--head);
+  letter-spacing: .02em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.name .tag { color: var(--faint); font-weight: 400; }
+.name.hidden { color: var(--muted); font-style: italic; }
+.meta { color: var(--muted); font-size: 12px; display: flex; gap: 8px; }
+.you {
+  font: 600 10px var(--head);
+  letter-spacing: .1em;
+  color: #10141b;
+  background: var(--ally);
+  padding: 1px 6px;
+  border-radius: 4px;
+  vertical-align: 2px;
+  margin-left: 6px;
+}
+
+.skin { display: grid; justify-items: end; gap: 3px; min-width: 0; }
+.skin img { width: 170px; height: 46px; object-fit: contain; }
+.skin-name {
+  max-width: 170px;
+  font-size: 12px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  display: flex; align-items: center; gap: 6px;
+}
+.skin-name::before {
+  content: "";
+  flex: none;
+  width: 7px; height: 7px; border-radius: 2px;
+  background: var(--tier, var(--faint));
+}
+.skin.standard img { opacity: .35; }
+.skin.standard .skin-name { color: var(--faint); }
+.skin .none { color: var(--faint); font-size: 12px; }
+
+/* All-weapons grid */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+  gap: 6px;
+  padding: 0 12px 12px;
+}
+.tile {
+  background: var(--panel-2);
+  border-radius: 8px;
+  padding: 8px;
+  border-top: 2px solid var(--tier, transparent);
+  min-width: 0;
+}
+.tile img { width: 100%; height: 34px; object-fit: contain; display: block; }
+.tile .t-name {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tile.standard { opacity: .45; }
+
+.foot {
+  padding: 8px 20px;
+  border-top: 1px solid var(--line);
+  color: var(--faint);
+  font-size: 11px;
+}
+
+@media (max-width: 980px) {
+  .teams { grid-template-columns: 1fr; }
+}
