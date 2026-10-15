@@ -1,42 +1,77 @@
-use super::*;
-use serde_json::json;
+use crate::account::{self, RP, VP};
+use crate::content::{Content, Sources};
+use crate::ranks;
+use crate::social;
+use crate::stats;
+use crate::view::*;
+use serde_json::{json, Value};
+use std::collections::HashMap;
 
 const VANDAL: &str = "9c82e19d-4575-0200-1a81-3eacf00cf872";
 const CLASSIC: &str = "29a0cfab-485b-f5d5-779a-b59f85e204a8";
+const ACT: &str = "act-now";
 
 fn content() -> Content {
-    let agents = json!({ "data": [
-        { "uuid": "AAAA-JETT", "displayName": "Jett", "displayIconSmall": "https://img/jett.png" },
-        { "uuid": "aaaa-sage", "displayName": "Sage", "displayIcon": "https://img/sage.png" }
-    ]});
-    let weapons = json!({ "data": [
-        {
-            "uuid": VANDAL, "displayName": "Vandal", "category": "EEquippableCategory::Rifle",
-            "displayIcon": "https://img/vandal.png", "defaultSkinUuid": "skin-vandal-std",
-            "skins": [
-                { "uuid": "skin-vandal-std", "displayName": "Standart Vandal", "contentTierUuid": null,
-                  "displayIcon": null, "chromas": [], "levels": [{ "displayIcon": "https://img/vstd.png" }] },
-                { "uuid": "SKIN-PRIME", "displayName": "Prime Vandal", "contentTierUuid": "tier-premium",
-                  "displayIcon": "https://img/prime.png",
-                  "chromas": [{ "uuid": "chroma-prime-blue", "displayName": "Prime Vandal Mavi",
-                                "fullRender": "https://img/prime-blue.png" }] }
-            ]
-        },
-        {
-            "uuid": CLASSIC, "displayName": "Classic", "category": "EEquippableCategory::Sidearm",
-            "displayIcon": "https://img/classic.png", "defaultSkinUuid": "skin-classic-std",
-            "skins": [{ "uuid": "skin-classic-std", "displayName": "Standart Classic", "chromas": [] }]
-        }
-    ]});
-    let tiers = json!({ "data": [{ "uuid": "tier-premium", "highlightColor": "d1548db3" }]});
-    let maps = json!({ "data": [{ "mapUrl": "/Game/Maps/Ascent/Ascent", "displayName": "Ascent" }]});
-    Content::from_values(&agents, &weapons, &tiers, &maps)
+    let src = Sources {
+        agents: json!({ "data": [
+            { "uuid": "AAAA-JETT", "displayName": "Jett", "displayIconSmall": "https://img/jett.png" },
+            { "uuid": "aaaa-sage", "displayName": "Sage", "displayIcon": "https://img/sage.png" }
+        ]}),
+        weapons: json!({ "data": [
+            {
+                "uuid": VANDAL, "displayName": "Vandal", "category": "EEquippableCategory::Rifle",
+                "displayIcon": "https://img/vandal.png", "defaultSkinUuid": "skin-vandal-std",
+                "skins": [
+                    { "uuid": "skin-vandal-std", "displayName": "Standart Vandal", "contentTierUuid": null,
+                      "displayIcon": null, "chromas": [],
+                      "levels": [{ "uuid": "lvl-vandal-std", "displayIcon": "https://img/vstd.png" }] },
+                    { "uuid": "SKIN-PRIME", "displayName": "Prime Vandal", "contentTierUuid": "tier-premium",
+                      "displayIcon": "https://img/prime.png",
+                      "levels": [{ "uuid": "LVL-PRIME-1" }],
+                      "chromas": [{ "uuid": "chroma-prime-blue", "displayName": "Prime Vandal Mavi",
+                                    "fullRender": "https://img/prime-blue.png" }] }
+                ]
+            },
+            {
+                "uuid": CLASSIC, "displayName": "Classic", "category": "EEquippableCategory::Sidearm",
+                "displayIcon": "https://img/classic.png", "defaultSkinUuid": "skin-classic-std",
+                "skins": [{ "uuid": "skin-classic-std", "displayName": "Standart Classic", "chromas": [] }]
+            }
+        ]}),
+        tiers: json!({ "data": [{ "uuid": "tier-premium", "highlightColor": "d1548db3", "rank": 2 }]}),
+        maps: json!({ "data": [{ "mapUrl": "/Game/Maps/Ascent/Ascent", "displayName": "Ascent" }]}),
+        buddies: json!({ "data": [{ "uuid": "b", "displayIcon": "https://img/buddy.png",
+                                   "levels": [{ "uuid": "BUDDY-LVL" }] }]}),
+        cards: json!({ "data": [{ "uuid": "card-1", "smallArt": "https://img/card-s.png", "wideArt": "https://img/card-w.png" }]}),
+        titles: json!({ "data": [{ "uuid": "title-1", "titleText": "Efsane" }, { "uuid": "title-2", "titleText": null }]}),
+        ranks: json!({ "data": [
+            { "tiers": [{ "tier": 24, "tierName": "OLD" }] },
+            { "tiers": [
+                { "tier": 0, "tierName": "DERECESİZ" },
+                { "tier": 12, "tierName": "ALTIN 1", "color": "ffd700ff", "smallIcon": "https://img/g1.png" },
+                { "tier": 21, "tierName": "YÜCELİŞ 1", "smallIcon": "https://img/a1.png" },
+                { "tier": 24, "tierName": "ÖLÜMSÜZLÜK 1", "smallIcon": "https://img/i1.png" }
+            ]}
+        ]}),
+        contracts: json!({ "data": [
+            { "uuid": "bp-1", "displayName": "Bölüm 9 Battle Pass",
+              "content": { "relationType": "Season", "relationUuid": "ACT-NOW",
+                           "chapters": [{ "levels": [{}, {}, {}] }, { "levels": [{}, {}] }] } },
+            { "uuid": "agent-1", "displayName": "Jett Kontratı",
+              "content": { "relationType": "Agent", "chapters": [{ "levels": [{}, {}, {}, {}] }] } }
+        ]}),
+        bundles: json!({ "data": [{ "uuid": "bundle-1", "displayName": "Prime", "displayIcon": "https://img/bundle.png" }]}),
+    };
+    Content::from_sources(&src)
 }
 
-fn item(skin: &str, chroma: Option<&str>) -> Value {
+fn item(skin: &str, chroma: Option<&str>, buddy: Option<&str>) -> Value {
     let mut sockets = json!({ SOCKET_SKIN: { "ID": SOCKET_SKIN, "Item": { "ID": skin, "TypeID": "x" } } });
     if let Some(ch) = chroma {
         sockets[SOCKET_CHROMA] = json!({ "ID": SOCKET_CHROMA, "Item": { "ID": ch, "TypeID": "y" } });
+    }
+    if let Some(b) = buddy {
+        sockets[SOCKET_BUDDY] = json!({ "ID": SOCKET_BUDDY, "Item": { "ID": b, "TypeID": "z" } });
     }
     json!({ "ID": "w", "TypeID": "t", "Sockets": sockets })
 }
@@ -47,17 +82,26 @@ fn content_parses() {
     assert_eq!(c.agents["aaaa-jett"].name, "Jett");
     assert_eq!(c.weapons[VANDAL].category, "Rifle");
     assert_eq!(c.skins["skin-prime"].tier.as_deref(), Some("tier-premium"));
+    assert_eq!(c.skins["skin-prime"].weapon, VANDAL);
+    assert_eq!(c.levels["lvl-prime-1"], "skin-prime");
     assert_eq!(c.skins["skin-vandal-std"].icon.as_deref(), Some("https://img/vstd.png"));
     assert_eq!(c.tiers["tier-premium"], "#d1548d");
-    assert_eq!(c.maps["/Game/Maps/Ascent/Ascent"], "Ascent");
+    assert_eq!(c.tier_rank["tier-premium"], 2);
+    assert_eq!(c.buddies["buddy-lvl"], "https://img/buddy.png");
+    assert_eq!(c.titles.len(), 1);
+    assert_eq!(c.rank(24).name, "ÖLÜMSÜZLÜK 1", "latest rank table wins");
+    assert_eq!(c.rank(12).color.as_deref(), Some("#ffd700"));
+    assert_eq!(c.contracts["bp-1"].levels, 5);
+    assert_eq!(c.contracts["bp-1"].season.as_deref(), Some(ACT));
+    assert_eq!(c.rank(5).name, "Seviye 5");
 }
 
 #[test]
-fn skins_resolve_with_chroma_and_order() {
+fn skins_resolve_with_chroma_buddy_and_order() {
     let c = content();
     let items = json!({
-        CLASSIC: item("skin-classic-std", None),
-        VANDAL: item("skin-prime", Some("chroma-prime-blue")),
+        CLASSIC: item("skin-classic-std", None, None),
+        VANDAL: item("skin-prime", Some("chroma-prime-blue"), Some("buddy-lvl")),
     });
     let w = weapon_skins(&items, &c);
     assert_eq!(w.len(), 2);
@@ -65,8 +109,10 @@ fn skins_resolve_with_chroma_and_order() {
     assert_eq!(w[0].skin, "Prime Vandal Mavi");
     assert_eq!(w[0].image.as_deref(), Some("https://img/prime-blue.png"));
     assert_eq!(w[0].tier_color.as_deref(), Some("#d1548d"));
+    assert_eq!(w[0].buddy.as_deref(), Some("https://img/buddy.png"));
     assert!(!w[0].standard);
     assert!(w[1].standard);
+    assert_eq!(w[1].buddy, None);
 }
 
 #[test]
@@ -79,14 +125,14 @@ fn core_game_match() {
             { "Subject": "enemy1", "TeamID": "Red", "CharacterID": "AAAA-SAGE",
               "PlayerIdentity": { "Incognito": true, "AccountLevel": 99, "HideAccountLevel": true } },
             { "Subject": "me", "TeamID": "Blue", "CharacterID": "aaaa-jett",
-              "PlayerIdentity": { "Incognito": true, "AccountLevel": 120 } },
+              "PlayerIdentity": { "Incognito": true, "AccountLevel": 120, "PlayerCardID": "CARD-1", "PlayerTitleID": "title-1" } },
             { "Subject": "mate", "TeamID": "Blue", "CharacterID": "aaaa-sage",
               "PlayerIdentity": { "Incognito": false, "AccountLevel": 50 } }
         ]
     });
     let l = json!({ "Loadouts": [
-        { "CharacterID": "x", "Loadout": { "Subject": "enemy1", "Items": { VANDAL: item("skin-prime", None) } } },
-        { "CharacterID": "x", "Loadout": { "Subject": "me", "Items": { VANDAL: item("skin-vandal-std", None) } } }
+        { "CharacterID": "x", "Loadout": { "Subject": "enemy1", "Items": { VANDAL: item("skin-prime", None, None) } } },
+        { "CharacterID": "x", "Loadout": { "Subject": "me", "Items": { VANDAL: item("skin-vandal-std", None, None) } } }
     ]});
     let raw = players_from_core(&m);
     let by = loadouts_by_player(&l, &raw);
@@ -94,17 +140,27 @@ fn core_game_match() {
     names.insert("me".to_string(), ("Liqht".to_string(), "TR1".to_string()));
     names.insert("mate".to_string(), ("Dost".to_string(), "".to_string()));
     names.insert("enemy1".to_string(), ("ShouldNotShow".to_string(), "X".to_string()));
-    let p = assemble(&raw, &by, &c, "me", &names);
+    let mut ranks_map = HashMap::new();
+    ranks_map.insert("enemy1".to_string(), ranks::RankInfo { current: c.rank(12), ..Default::default() });
+    let parties = number_parties(&[vec!["mate".to_string(), "me".to_string()]], &["enemy1".to_string(), "me".to_string(), "mate".to_string()]);
+    let x = Extras { names: &names, ranks: &ranks_map, parties: &parties };
+    let p = assemble(&raw, &by, &c, "me", &x);
 
     assert_eq!(p.iter().map(|x| x.puuid.as_str()).collect::<Vec<_>>(), ["me", "mate", "enemy1"]);
     assert!(p[0].is_me && p[0].ally && !p[0].hidden, "own incognito flag never hides you from yourself");
     assert_eq!(p[0].name.as_deref(), Some("Liqht"));
+    assert_eq!(p[0].card.as_deref(), Some("https://img/card-s.png"));
+    assert_eq!(p[0].title.as_deref(), Some("Efsane"));
+    assert_eq!(p[0].party, Some(1));
+    assert_eq!(p[1].party, Some(1));
     assert_eq!(p[1].tag, None);
     assert!(p[1].weapons.is_empty());
     let enemy = &p[2];
     assert!(!enemy.ally && enemy.hidden);
     assert_eq!(enemy.name, None, "hidden names stay hidden");
     assert_eq!(enemy.level, None);
+    assert_eq!(enemy.party, None);
+    assert_eq!(enemy.rank.as_ref().map(|r| r.current.tier), Some(12));
     assert_eq!(enemy.agent.as_deref(), Some("Sage"));
     assert_eq!(enemy.weapons[0].skin, "Prime Vandal");
     assert_eq!(weapon_meta(&p, &c).len(), 1);
@@ -119,19 +175,224 @@ fn pregame_loadouts_without_subject_use_order() {
     let raw = players_from_pregame(&m);
     assert_eq!(raw[0].agent_id, None);
     let l = json!({ "Loadouts": [
-        { "Items": { VANDAL: item("skin-vandal-std", None) } },
-        { "Items": { VANDAL: item("skin-prime", None) } }
+        { "Items": { VANDAL: item("skin-vandal-std", None, None) } },
+        { "Items": { VANDAL: item("skin-prime", None, None) } }
     ], "LoadoutsValid": true });
     let by = loadouts_by_player(&l, &raw);
     assert!(by.contains_key("me") && by.contains_key("mate"));
-    let p = assemble(&raw, &by, &content(), "me", &HashMap::new());
+    let empty_n = HashMap::new();
+    let empty_r = HashMap::new();
+    let empty_p = HashMap::new();
+    let x = Extras { names: &empty_n, ranks: &empty_r, parties: &empty_p };
+    let p = assemble(&raw, &by, &content(), "me", &x);
     assert!(p.iter().all(|x| x.ally));
     assert_eq!(p[1].weapons[0].skin, "Prime Vandal");
 }
 
 #[test]
+fn parties_merge_and_number_in_roster_order() {
+    let roster: Vec<String> = ["a", "b", "c", "d", "e", "f"].iter().map(|s| s.to_string()).collect();
+    let groups = vec![
+        vec!["d".to_string(), "e".to_string()],
+        vec!["e".to_string(), "f".to_string()],
+        vec!["a".to_string(), "b".to_string()],
+        vec!["zz".to_string(), "c".to_string()],
+    ];
+    let n = number_parties(&groups, &roster);
+    assert_eq!(n.get("a"), Some(&1));
+    assert_eq!(n.get("b"), Some(&1));
+    assert_eq!(n.get("c"), None, "outsider does not make a party");
+    assert_eq!(n.get("d"), Some(&2));
+    assert_eq!(n.get("f"), Some(&2));
+}
+
+#[test]
+fn ranks_current_and_peak() {
+    let c = content();
+    let mmr = json!({
+        "QueueSkills": { "competitive": { "SeasonalInfoBySeasonID": {
+            "ACT-NOW": { "CompetitiveTier": 12, "RankedRating": 47, "NumberOfWinsWithPlacements": 9,
+                         "NumberOfGames": 15, "WinsByTier": { "12": 3 } },
+            "act-old": { "CompetitiveTier": 21, "WinsByTier": { "20": 2, "21": 1 } }
+        }}}
+    });
+    let r = ranks::from_mmr(&mmr, Some(ACT), &c);
+    assert_eq!(r.current.tier, 12);
+    assert_eq!(r.rr, Some(47));
+    assert_eq!(r.wins, Some(9));
+    assert_eq!(r.games, Some(15));
+    assert_eq!(r.peak.as_ref().map(|p| p.tier), Some(21));
+
+    let fallback = json!({ "LatestCompetitiveUpdate": { "SeasonID": "act-now", "TierAfterUpdate": 24, "RankedRatingAfterUpdate": 10 } });
+    let r = ranks::from_mmr(&fallback, Some(ACT), &c);
+    assert_eq!(r.current.name, "ÖLÜMSÜZLÜK 1");
+    assert_eq!(r.peak.map(|p| p.tier), Some(24));
+
+    let none = ranks::from_mmr(&json!({}), Some(ACT), &c);
+    assert_eq!(none.current.tier, 0);
+    assert_eq!(none.rr, None);
+    assert_eq!(none.peak, None);
+
+    let content_v = json!({ "Seasons": [
+        { "ID": "EP", "Type": "episode", "IsActive": true },
+        { "ID": "ACT-NOW", "Type": "act", "IsActive": true },
+        { "ID": "old", "Type": "act", "IsActive": false }
+    ]});
+    assert_eq!(ranks::active_act(&content_v).as_deref(), Some(ACT));
+}
+
+fn details() -> Value {
+    json!({
+        "matchInfo": { "matchId": "m1", "mapId": "/Game/Maps/Ascent/Ascent", "queueID": "competitive", "gameStartMillis": 1000 },
+        "players": [
+            { "subject": "me", "teamId": "Blue", "partyId": "p1", "characterId": "AAAA-JETT", "competitiveTier": 12,
+              "stats": { "score": 5200, "roundsPlayed": 20, "kills": 20, "deaths": 10, "assists": 4 } },
+            { "subject": "mate", "teamId": "Blue", "partyId": "p1", "characterId": "aaaa-sage",
+              "stats": { "score": 3000, "roundsPlayed": 20, "kills": 10, "deaths": 15, "assists": 9 } },
+            { "subject": "other", "teamId": "Red", "partyId": "p2",
+              "stats": { "score": 1, "roundsPlayed": 20, "kills": 1, "deaths": 1, "assists": 1 } }
+        ],
+        "teams": [ { "teamId": "Blue", "won": true, "roundsWon": 13 }, { "teamId": "Red", "won": false, "roundsWon": 7 } ],
+        "roundResults": [
+            { "playerStats": [ { "subject": "me", "damage": [ { "headshots": 3, "bodyshots": 6, "legshots": 1 } ] } ] },
+            { "playerStats": [ { "subject": "me", "damage": [ { "headshots": 1, "bodyshots": 9, "legshots": 0 } ] } ] }
+        ]
+    })
+}
+
+#[test]
+fn match_stats() {
+    let c = content();
+    let d = details();
+    let l = stats::line(&d, "me", &c).unwrap();
+    assert_eq!(l.acs, 260);
+    assert_eq!(l.hs, Some(20));
+    assert_eq!(l.won, Some(true));
+    assert_eq!((l.rounds_us, l.rounds_them), (13, 7));
+    assert_eq!(l.agent.as_deref(), Some("Jett"));
+    assert_eq!(l.map.as_deref(), Some("Ascent"));
+    assert_eq!(l.queue, "Rekabetçi");
+    assert_eq!(l.tier.as_ref().map(|t| t.tier), Some(12));
+    assert!(stats::line(&d, "nobody", &c).is_none());
+
+    let mut second = l.clone();
+    second.won = Some(false);
+    second.kills = 0;
+    second.deaths = 10;
+    second.acs = 100;
+    second.hs = None;
+    let s = stats::summarize(vec![l, second]);
+    assert_eq!(s.kd, Some(1.0));
+    assert_eq!(s.acs, Some(180));
+    assert_eq!(s.hs, Some(20));
+    assert_eq!(s.winrate, Some(50));
+    assert_eq!(s.agents[0].count, 2);
+    assert_eq!(stats::summarize(vec![]), stats::PlayerStats::default());
+
+    let groups = stats::parties_in(&d, &["me".to_string(), "mate".to_string(), "other".to_string()]);
+    assert_eq!(groups, vec![vec!["me".to_string(), "mate".to_string()]]);
+}
+
+#[test]
+fn presences_and_friends() {
+    use base64::Engine as _;
+    let enc = |v: Value| base64::engine::general_purpose::STANDARD.encode(v.to_string());
+    let p = json!({ "presences": [
+        { "puuid": "f1", "product": "valorant", "state": "chat", "private": enc(json!({
+            "sessionLoopState": "INGAME", "partyId": "P", "partySize": 2, "matchMap": "/Game/Maps/Ascent/Ascent",
+            "queueId": "competitive", "competitiveTier": 12, "accountLevel": 77,
+            "partyOwnerMatchScoreAllyTeam": 5, "partyOwnerMatchScoreEnemyTeam": 3 })) },
+        { "puuid": "f2", "product": "valorant", "state": "chat", "private": enc(json!({
+            "matchPresenceData": { "sessionLoopState": "MENUS" },
+            "partyPresenceData": { "partyId": "P", "partySize": 2 },
+            "playerPresenceData": { "competitiveTier": 0 } })) },
+        { "puuid": "f3", "product": "league_of_legends", "state": "chat", "private": "<xml/>" }
+    ]});
+    let pres = social::parse_presences(&p);
+    assert_eq!(pres.len(), 3);
+    assert_eq!(pres[0].score(), Some([5, 3]));
+    assert_eq!(pres[1].party_id().as_deref(), Some("P"), "nested presence format");
+    assert_eq!(social::party_groups(&pres), vec![vec!["f1".to_string(), "f2".to_string()]]);
+
+    let friends = json!({ "friends": [
+        { "puuid": "f4", "game_name": "Uyuyan", "game_tag": "1" },
+        { "puuid": "f3", "game_name": "Lolcu", "game_tag": "2" },
+        { "puuid": "f2", "game_name": "Menu", "game_tag": "3" },
+        { "puuid": "f1", "game_name": "Maci", "game_tag": "4" }
+    ]});
+    let list = social::friends(&friends, &pres, &content());
+    let order: Vec<&str> = list.iter().map(|f| f.name.as_str()).collect();
+    assert_eq!(order, ["Maci", "Menu", "Lolcu", "Uyuyan"]);
+    assert_eq!(list[0].status, "Maçta");
+    assert_eq!(list[0].map.as_deref(), Some("Ascent"));
+    assert_eq!(list[0].score, Some([5, 3]));
+    assert_eq!(list[0].rank.as_ref().map(|r| r.tier), Some(12));
+    assert_eq!(list[0].level, Some(77));
+    assert_eq!(list[1].rank, None);
+    assert_eq!(list[2].status, "League of Legends'ta");
+    assert!(!list[3].online);
+}
+
+#[test]
+fn account_parts() {
+    let c = content();
+    let w = account::wallet(&json!({ "Balances": { VP: 1250, RP: 40 } }));
+    assert_eq!((w.vp, w.rp, w.kc), (Some(1250), Some(40), None));
+
+    let store = account::store(
+        &json!({
+            "SkinsPanelLayout": {
+                "SingleItemStoreOffers": [{ "OfferID": "o", "Cost": { VP: 1775 }, "Rewards": [{ "ItemID": "LVL-PRIME-1" }] }],
+                "SingleItemOffersRemainingDurationInSeconds": 3600
+            },
+            "BonusStore": {
+                "BonusStoreOffers": [{ "Offer": { "Cost": { VP: 1775 }, "Rewards": [{ "ItemID": "lvl-prime-1" }] },
+                                       "DiscountPercent": 30, "DiscountCosts": { VP: 1242 } }],
+                "BonusStoreRemainingDurationInSeconds": 99
+            },
+            "FeaturedBundle": { "Bundle": { "DataAssetID": "BUNDLE-1", "DurationRemainingInSeconds": 500 } }
+        }),
+        &c,
+    );
+    assert_eq!(store.daily[0].name, "Prime Vandal");
+    assert_eq!(store.daily[0].price, Some(1775));
+    assert_eq!(store.daily_ends_in, Some(3600));
+    assert_eq!(store.night[0].price, Some(1242));
+    assert_eq!(store.night[0].original, Some(1775));
+    assert_eq!(store.night[0].discount, Some(30));
+    assert_eq!(store.bundles[0].name, "Prime");
+
+    let owned = account::collection(
+        &json!({ "Entitlements": [{ "ItemID": "LVL-PRIME-1" }, { "ItemID": "lvl-prime-1" }, { "ItemID": "lvl-vandal-std" }, { "ItemID": "unknown" }] }),
+        &c,
+    );
+    assert_eq!(owned.len(), 1, "dedupes levels and skips default skins");
+    assert_eq!(owned[0].weapon, "Vandal");
+
+    let contracts = account::contracts(
+        &json!({ "Contracts": [
+            { "ContractDefinitionID": "BP-1", "ProgressionLevelReached": 3 },
+            { "ContractDefinitionID": "agent-1", "ProgressionLevelReached": 1 }
+        ], "ActiveSpecialContract": "AGENT-1" }),
+        Some(ACT),
+        &c,
+    );
+    assert_eq!(contracts.len(), 2);
+    assert_eq!((contracts[0].level, contracts[0].total), (3, 5));
+    assert_eq!(contracts[1].name, "Jett Kontratı");
+    assert_eq!((contracts[1].level, contracts[1].total), (1, 4));
+
+    let rr = account::rr_history(
+        &json!({ "Matches": [{ "MapID": "/Game/Maps/Ascent/Ascent", "TierAfterUpdate": 12, "RankedRatingAfterUpdate": 40, "RankedRatingEarned": -17, "MatchStartTime": 5 }] }),
+        &c,
+    );
+    assert_eq!(rr[0].earned, -17);
+    assert_eq!(rr[0].map.as_deref(), Some("Ascent"));
+}
+
+#[test]
 fn queue_names() {
-    assert_eq!(queue_label("competitive"), "Rekabetçi");
-    assert_eq!(queue_label("newmode"), "Newmode");
-    assert_eq!(queue_label(""), "Özel oyun");
+    assert_eq!(stats::queue_label("competitive"), "Rekabetçi");
+    assert_eq!(stats::queue_label("newmode"), "Newmode");
+    assert_eq!(stats::queue_label(""), "Özel oyun");
 }

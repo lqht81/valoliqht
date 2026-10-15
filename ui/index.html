@@ -12,31 +12,68 @@
       <span class="mark" aria-hidden="true"></span>
       <span class="brand-name">ValoLiqht</span>
     </div>
+    <nav class="tabs" id="tabs" aria-label="Sayfalar">
+      <button class="tab" data-tab="match" aria-selected="true">Maç</button>
+      <button class="tab" data-tab="friends" aria-selected="false">Arkadaşlar</button>
+      <button class="tab" data-tab="account" aria-selected="false">Hesabım</button>
+    </nav>
     <div class="match" id="match"></div>
+    <button class="switch" id="advanced" role="switch" aria-checked="false"
+      title="Premade grupları, peak rank ve oyuncuların son maçları. Hesap riski taşıyabilir.">
+      <span class="knob" aria-hidden="true"></span>Gelişmiş
+    </button>
     <div class="status" id="status" data-state="waiting">
       <span class="dot"></span><span id="status-text">Bağlanıyor</span>
     </div>
   </header>
 
-  <nav class="weapons" id="weapons" aria-label="Silah seçimi"></nav>
+  <section class="view" id="view-match">
+    <nav class="weapons" id="weapons" aria-label="Silah seçimi"></nav>
+    <main class="scroll">
+      <section class="empty" id="empty">
+        <div class="empty-mark" aria-hidden="true"></div>
+        <h1 id="empty-title">Bağlanıyor</h1>
+        <p id="empty-text">Riot Client aranıyor…</p>
+      </section>
+      <div class="teams" id="teams" hidden>
+        <section class="team ally">
+          <h2>Takımın</h2>
+          <div class="list" id="ally"></div>
+        </section>
+        <section class="team enemy">
+          <h2>Rakipler</h2>
+          <div class="list" id="enemy"></div>
+        </section>
+      </div>
+    </main>
+  </section>
 
-  <main id="main">
-    <section class="empty" id="empty">
-      <div class="empty-mark" aria-hidden="true"></div>
-      <h1 id="empty-title">Bağlanıyor</h1>
-      <p id="empty-text">Riot Client aranıyor…</p>
-    </section>
-    <div class="teams" id="teams" hidden>
-      <section class="team ally">
-        <h2>Takımın</h2>
-        <div class="list" id="ally"></div>
-      </section>
-      <section class="team enemy">
-        <h2>Rakipler</h2>
-        <div class="list" id="enemy"></div>
-      </section>
+  <section class="view" id="view-friends" hidden>
+    <main class="scroll">
+      <div class="page" id="friends"></div>
+    </main>
+  </section>
+
+  <section class="view" id="view-account" hidden>
+    <main class="scroll">
+      <div class="page" id="account"></div>
+    </main>
+  </section>
+
+  <div class="modal" id="risk" hidden>
+    <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="risk-title">
+      <h2 id="risk-title">Gelişmiş bilgileri aç?</h2>
+      <p>Bu seçenek <b>premade gruplarını</b>, <b>peak rankları</b> ve <b>diğer oyuncuların son maçlarını</b> gösterir.
+        Bunun için Riot'un sunucularına, oyunun kendisinin normalde yapmadığı sorgular senin hesabınla gönderilir.</p>
+      <p>Riot, rankları ya da birlikte oynayan oyuncuları bu şekilde görmenin <b>yasak mı serbest mi olduğunu açıkça söylemedi</b>.
+        Ancak oyunun gizlediği bilgileri çeken onaysız uygulamalar için ban uygulayabildiğini belirtti.</p>
+      <p class="warn">Açarsan oluşabilecek risk senin hesabına aittir. İstediğin zaman tekrar kapatabilirsin.</p>
+      <div class="actions">
+        <button class="btn" id="risk-cancel">Vazgeç</button>
+        <button class="btn primary" id="risk-ok">Anladım, aç</button>
+      </div>
     </div>
-  </main>
+  </div>
 
   <footer class="foot">Veriler yalnızca bu bilgisayardaki Riot Client'tan, Riot sunucularından ve valorant-api.com'dan okunur. Hiçbir yere gönderilmez.</footer>
 

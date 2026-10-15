@@ -18,6 +18,7 @@ pub struct Session {
     pub region: String,
     pub shard: String,
     version: String,
+    pub lockfile: Lockfile,
 }
 
 pub struct Riot {
@@ -33,6 +34,22 @@ impl Default for Riot {
     }
 }
 
+/// 404 → `Ok(None)`; other failures → `Err`.
+async fn read(resp: Result<reqwest::Response, reqwest::Error>, what: &str) -> Res<Option<Value>> {
+    let resp = resp.map_err(|e| format!("{what} ulaşılamadı: {e}"))?;
+    let status = resp.status();
+    if status == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+        return Err("Riot istek sınırına takıldı, birazdan tekrar denenecek".into());
+    }
+    if !status.is_success() {
+        return Err(format!("{what} {status} döndü"));
+    }
+    resp.json().await.map(Some).map_err(|e| e.to_string())
+}
+
 impl Riot {
     pub fn new() -> Self {
         let local = reqwest::Client::builder()
@@ -42,25 +59,23 @@ impl Riot {
             .build()
             .expect("local http client");
         let remote = reqwest::Client::builder()
-            .timeout(Duration::from_secs(8))
+            .timeout(Duration::from_secs(10))
             .build()
             .expect("remote http client");
         Self { local, remote }
     }
 
-    async fn local_get(&self, lf: &Lockfile, path: &str) -> Res<Value> {
+    pub async fn local_get(&self, lf: &Lockfile, path: &str) -> Res<Value> {
         let url = format!("https://127.0.0.1:{}{}", lf.port, path);
         let resp = self
             .local
             .get(url)
             .basic_auth("riot", Some(&lf.password))
             .send()
-            .await
-            .map_err(|e| format!("Riot Client'a bağlanılamadı: {e}"))?;
-        if !resp.status().is_success() {
-            return Err(format!("Riot Client {} döndü", resp.status()));
-        }
-        resp.json().await.map_err(|e| e.to_string())
+            .await;
+        read(resp, "Riot Client")
+            .await?
+            .ok_or_else(|| "Riot Client bu bilgiyi vermedi".to_string())
     }
 
     pub async fn session(&self, lf: &Lockfile, log: &LogInfo) -> Res<Session> {
@@ -93,6 +108,7 @@ impl Riot {
             region,
             shard,
             version,
+            lockfile: lf.clone(),
         })
     }
 
@@ -116,15 +132,12 @@ impl Riot {
     }
 
     async fn client_version(&self) -> Res<String> {
-        let v: Value = self
-            .remote
-            .get("https://valorant-api.com/v1/version")
-            .send()
-            .await
-            .map_err(|e| e.to_string())?
-            .json()
-            .await
-            .map_err(|e| e.to_string())?;
+        let v = read(
+            self.remote.get("https://valorant-api.com/v1/version").send().await,
+            "valorant-api.com",
+        )
+        .await?
+        .unwrap_or(Value::Null);
         v.pointer("/data/riotClientVersion")
             .and_then(Value::as_str)
             .map(str::to_string)
@@ -138,22 +151,31 @@ impl Riot {
             .header("X-Riot-ClientVersion", &s.version)
     }
 
-    /// GET on the game server. `Ok(None)` means 404 (e.g. not in that phase).
+    /// Live game server (pregame, core-game).
     pub async fn glz(&self, s: &Session, path: &str) -> Res<Option<Value>> {
         let url = format!("https://glz-{}-1.{}.a.pvp.net{}", s.region, s.shard, path);
-        let resp = self
-            .signed(self.remote.get(url), s)
-            .send()
-            .await
-            .map_err(|e| format!("Riot sunucusuna ulaşılamadı: {e}"))?;
-        let status = resp.status();
-        if status == reqwest::StatusCode::NOT_FOUND {
-            return Ok(None);
-        }
-        if !status.is_success() {
-            return Err(format!("Riot sunucusu {status} döndü"));
-        }
-        resp.json().await.map(Some).map_err(|e| e.to_string())
+        read(self.signed(self.remote.get(url), s).send().await, "Riot oyun sunucusu").await
+    }
+
+    /// Player data server (ranks, history, store, wallet…).
+    pub async fn pd(&self, s: &Session, path: &str) -> Res<Option<Value>> {
+        let url = format!("https://pd.{}.a.pvp.net{}", s.shard, path);
+        read(self.signed(self.remote.get(url), s).send().await, "Riot oyuncu sunucusu").await
+    }
+
+    pub async fn pd_post(&self, s: &Session, path: &str, body: &Value) -> Res<Option<Value>> {
+        let url = format!("https://pd.{}.a.pvp.net{}", s.shard, path);
+        read(
+            self.signed(self.remote.post(url), s).json(body).send().await,
+            "Riot oyuncu sunucusu",
+        )
+        .await
+    }
+
+    /// Shared content server (seasons).
+    pub async fn shared(&self, s: &Session, path: &str) -> Res<Option<Value>> {
+        let url = format!("https://shared.{}.a.pvp.net{}", s.shard, path);
+        read(self.signed(self.remote.get(url), s).send().await, "Riot içerik sunucusu").await
     }
 
     /// Riot IDs for a set of players.
@@ -162,16 +184,12 @@ impl Riot {
             return Ok(Vec::new());
         }
         let url = format!("https://pd.{}.a.pvp.net/name-service/v2/players", s.shard);
-        let resp = self
-            .signed(self.remote.put(url), s)
-            .json(puuids)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
-        if !resp.status().is_success() {
-            return Err(format!("İsim servisi {} döndü", resp.status()));
-        }
-        let list: Value = resp.json().await.map_err(|e| e.to_string())?;
+        let list = read(
+            self.signed(self.remote.put(url), s).json(puuids).send().await,
+            "İsim servisi",
+        )
+        .await?
+        .unwrap_or(Value::Null);
         Ok(list
             .as_array()
             .map(|a| {
@@ -198,4 +216,8 @@ pub fn str_at(v: &Value, key: &str) -> Option<String> {
         .and_then(Value::as_str)
         .filter(|s| !s.is_empty())
         .map(str::to_string)
+}
+
+pub fn u64_at(v: &Value, key: &str) -> Option<u64> {
+    v.get(key).and_then(Value::as_u64)
 }
