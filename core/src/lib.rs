@@ -44,6 +44,21 @@ const STATS_MATCHES: usize = 8;
 const OWN_MATCHES: usize = 20;
 const OWN_TTL: Duration = Duration::from_secs(300);
 const INVENTORY_TTL: Duration = Duration::from_secs(600);
+/// Party info in menus changes rarely; no need to ask every poll.
+const LOBBY_TTL: Duration = Duration::from_secs(15);
+/// Match data is fetched once per match, then once more after this delay in
+/// case it was read while players were still loading in.
+const MATCH_RECHECK: Duration = Duration::from_secs(60);
+
+/// Match and loadout data kept for the whole match.
+struct LiveMatch {
+    id: String,
+    phase: &'static str,
+    at: Instant,
+    rechecked: bool,
+    m: Arc<Value>,
+    l: Arc<Value>,
+}
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct CatalogSkin {
@@ -94,6 +109,8 @@ struct Inner {
     /// Your recent matches, newest first, and when they were last refreshed.
     own: Mutex<(Option<Instant>, Vec<OwnMatch>)>,
     own_loading: AtomicBool,
+    live: Mutex<Option<LiveMatch>>,
+    lobby: Mutex<Option<(Instant, Option<view::Lobby>)>>,
 }
 
 impl Inner {
@@ -325,6 +342,8 @@ impl Engine {
                 inventory: Mutex::new(None),
                 own: Mutex::new((None, Vec::new())),
                 own_loading: AtomicBool::new(false),
+                live: Mutex::new(None),
+                lobby: Mutex::new(None),
             }),
         }
     }
@@ -455,37 +474,47 @@ impl Engine {
             );
         }
 
+        // Which screen you are on comes from the local Riot Client, so the
+        // game servers are only asked about the phase you are actually in.
+        let state = presences
+            .iter()
+            .find(|p| p.puuid == s.puuid)
+            .and_then(|p| p.loop_state());
+        let known = matches!(state.as_deref(), Some("MENUS" | "PREGAME" | "INGAME"));
+        let check_core = !known || state.as_deref() == Some("INGAME");
+        let check_pre = !known || state.as_deref() == Some("PREGAME");
+
         // In a match (or loading into one).
-        match i.riot.glz(&s, &format!("/core-game/v1/players/{}", s.puuid)).await {
-            Ok(Some(v)) => {
-                if let Some(id) = str_at(&v, "MatchID") {
-                    let m = i.riot.glz(&s, &format!("/core-game/v1/matches/{id}")).await;
-                    let l = i.riot.glz(&s, &format!("/core-game/v1/matches/{id}/loadouts")).await;
-                    if let (Ok(Some(m)), Ok(Some(l))) = (m, l) {
-                        let raw = view::players_from_core(&m);
-                        return self.build(&s, &c, "ingame", id, &m, raw, &l, &presences).await;
+        if check_core {
+            match i.riot.glz(&s, &format!("/core-game/v1/players/{}", s.puuid)).await {
+                Ok(Some(v)) => {
+                    if let Some(id) = str_at(&v, "MatchID") {
+                        if let Some((m, l)) = self.core_data(&s, &id).await {
+                            let raw = view::players_from_core(&m);
+                            return self.build(&s, &c, "ingame", id, &m, raw, &l, &presences).await;
+                        }
                     }
                 }
+                Ok(None) => {}
+                Err(e) => return Snapshot::status("error", e),
             }
-            Ok(None) => {}
-            Err(e) => return Snapshot::status("error", e),
         }
 
-        // Agent select.
-        match i.riot.glz(&s, &format!("/pregame/v1/players/{}", s.puuid)).await {
-            Ok(Some(v)) => {
-                if let Some(id) = str_at(&v, "MatchID") {
-                    let m = i.riot.glz(&s, &format!("/pregame/v1/matches/{id}")).await;
-                    let l = i.riot.glz(&s, &format!("/pregame/v1/matches/{id}/loadouts")).await;
-                    if let Ok(Some(m)) = m {
-                        let raw = view::players_from_pregame(&m);
-                        let l = l.ok().flatten().unwrap_or(Value::Null);
-                        return self.build(&s, &c, "pregame", id, &m, raw, &l, &presences).await;
+        // Agent select: picks change live, loadouts are read once.
+        if check_pre {
+            match i.riot.glz(&s, &format!("/pregame/v1/players/{}", s.puuid)).await {
+                Ok(Some(v)) => {
+                    if let Some(id) = str_at(&v, "MatchID") {
+                        if let Ok(Some(m)) = i.riot.glz(&s, &format!("/pregame/v1/matches/{id}")).await {
+                            let l = self.pregame_loadouts(&s, &id).await;
+                            let raw = view::players_from_pregame(&m);
+                            return self.build(&s, &c, "pregame", id, &m, raw, &l, &presences).await;
+                        }
                     }
                 }
+                Ok(None) => {}
+                Err(e) => return Snapshot::status("error", e),
             }
-            Ok(None) => {}
-            Err(e) => return Snapshot::status("error", e),
         }
 
         let mut snap = Snapshot::status(
@@ -493,8 +522,90 @@ impl Engine {
             "Ajan seçimine girdiğinde takımının, maç başlayınca herkesin bilgileri görünür.",
         );
         snap.advanced = i.advanced();
-        snap.lobby = self.lobby(&s, &c).await;
+        snap.lobby = self.lobby_cached(&s, &c).await;
         snap
+    }
+
+    /// Core-game match and loadouts: fetched once per match (plus one
+    /// re-check a minute in), then served from memory.
+    async fn core_data(&self, s: &Session, id: &str) -> Option<(Arc<Value>, Arc<Value>)> {
+        let i = &self.inner;
+        let cached = {
+            let live = i.live.lock().unwrap();
+            live.as_ref()
+                .filter(|x| x.id == id && x.phase == "ingame")
+                .map(|x| (x.m.clone(), x.l.clone(), x.rechecked || x.at.elapsed() < MATCH_RECHECK))
+        };
+        if let Some((m, l, fine)) = cached.clone() {
+            if fine {
+                return Some((m, l));
+            }
+        }
+        let m = i.riot.glz(s, &format!("/core-game/v1/matches/{id}")).await;
+        let l = i.riot.glz(s, &format!("/core-game/v1/matches/{id}/loadouts")).await;
+        match (m, l) {
+            (Ok(Some(m)), Ok(Some(l))) => {
+                let (m, l) = (Arc::new(m), Arc::new(l));
+                *i.live.lock().unwrap() = Some(LiveMatch {
+                    id: id.to_string(),
+                    phase: "ingame",
+                    at: Instant::now(),
+                    rechecked: cached.is_some(),
+                    m: m.clone(),
+                    l: l.clone(),
+                });
+                Some((m, l))
+            }
+            // Keep showing what we had if the re-check fails.
+            _ => cached.map(|(m, l, _)| (m, l)),
+        }
+    }
+
+    /// Pregame loadouts: fetched until Riot marks them valid, then kept.
+    async fn pregame_loadouts(&self, s: &Session, id: &str) -> Value {
+        let i = &self.inner;
+        let cached = {
+            let live = i.live.lock().unwrap();
+            live.as_ref()
+                .filter(|x| x.id == id && x.phase == "pregame")
+                .map(|x| x.l.clone())
+        };
+        if let Some(l) = &cached {
+            if l.get("LoadoutsValid").and_then(Value::as_bool) == Some(true) {
+                return (**l).clone();
+            }
+        }
+        match i.riot.glz(s, &format!("/pregame/v1/matches/{id}/loadouts")).await {
+            Ok(Some(l)) => {
+                let l = Arc::new(l);
+                *i.live.lock().unwrap() = Some(LiveMatch {
+                    id: id.to_string(),
+                    phase: "pregame",
+                    at: Instant::now(),
+                    rechecked: false,
+                    m: Arc::new(Value::Null),
+                    l: l.clone(),
+                });
+                (*l).clone()
+            }
+            _ => cached.map(|l| (*l).clone()).unwrap_or(Value::Null),
+        }
+    }
+
+    async fn lobby_cached(&self, s: &Session, c: &Content) -> Option<view::Lobby> {
+        let i = &self.inner;
+        let cached = {
+            let slot = i.lobby.lock().unwrap();
+            slot.as_ref()
+                .filter(|(at, _)| at.elapsed() < LOBBY_TTL)
+                .map(|(_, l)| l.clone())
+        };
+        if let Some(l) = cached {
+            return l;
+        }
+        let l = self.lobby(s, c).await;
+        *i.lobby.lock().unwrap() = Some((Instant::now(), l.clone()));
+        l
     }
 
     async fn lobby(&self, s: &Session, c: &Content) -> Option<view::Lobby> {
